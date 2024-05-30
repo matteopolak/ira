@@ -8,9 +8,11 @@ anyhow = "1.0.86"
 bytemuck = { version = "1.16.0", features = ["derive"] }
 env_logger = "0.11"
 glam = "0.27.0"
+gltf = "1.4.1"
 image = "0.25.1"
 log = "0.4"
 pollster = "0.3"
+tobj = { version = "4.0.2", features = ["async"] }
 wgpu = "0.20"
 winit = "0.30"
 

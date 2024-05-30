@@ -1,9 +1,11 @@
 mod camera;
+mod model;
 mod texture;
 
-use std::{mem, sync::Arc};
+use std::sync::Arc;
 
-use bytemuck::{Pod, Zeroable};
+use glam::{Mat4, Quat, Vec3};
+use model::DrawModel;
 use wgpu::util::DeviceExt;
 use winit::{
 	application::ApplicationHandler,
@@ -17,172 +19,42 @@ struct App {
 	state: Option<State>,
 }
 
-#[repr(C)]
-#[derive(Copy, Clone, Debug, Zeroable, Pod)]
-struct Vertex {
-	position: [f32; 3],
-	tex_coords: [f32; 2],
+struct Instance {
+	position: Vec3,
+	rotation: Quat,
 }
 
-impl Vertex {
-	const ATTRIBUTES: [wgpu::VertexAttribute; 2] =
-		wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x2];
-
-	fn desc() -> wgpu::VertexBufferLayout<'static> {
-		wgpu::VertexBufferLayout {
-			array_stride: mem::size_of::<Self>() as wgpu::BufferAddress,
-			step_mode: wgpu::VertexStepMode::Vertex,
-			attributes: &Self::ATTRIBUTES,
+impl Instance {
+	fn to_raw(&self) -> InstanceRaw {
+		InstanceRaw {
+			model: (Mat4::from_translation(self.position) * Mat4::from_quat(self.rotation))
+				.to_cols_array_2d(),
 		}
 	}
 }
 
-mod triangle {
-	use super::Vertex;
-
-	pub const VERTICES: &[Vertex] = &[
-		// Changed
-		Vertex {
-			position: [-0.0868241, 0.49240386, 0.0],
-			tex_coords: [0.4131759, 0.00759614],
-		}, // A
-		Vertex {
-			position: [-0.49513406, 0.06958647, 0.0],
-			tex_coords: [0.0048659444, 0.43041354],
-		}, // B
-		Vertex {
-			position: [-0.21918549, -0.44939706, 0.0],
-			tex_coords: [0.28081453, 0.949397],
-		}, // C
-		Vertex {
-			position: [0.35966998, -0.3473291, 0.0],
-			tex_coords: [0.85967, 0.84732914],
-		}, // D
-		Vertex {
-			position: [0.44147372, 0.2347359, 0.0],
-			tex_coords: [0.9414737, 0.2652641],
-		}, // E
-	];
-
-	pub const INDICES: &[u16] = &[0, 1, 4, 1, 2, 4, 2, 3, 4];
+#[repr(C)]
+#[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+struct InstanceRaw {
+	model: [[f32; 4]; 4],
 }
 
-mod cube {
-	use super::Vertex;
-
-	pub const VERTICES: &[Vertex] = &[
-		Vertex {
-			position: [-1.0, -1.0, 1.0],
-			tex_coords: [0.0, 0.0],
-		},
-		Vertex {
-			position: [1.0, -1.0, 1.0],
-			tex_coords: [1.0, 0.0],
-		},
-		Vertex {
-			position: [1.0, 1.0, 1.0],
-			tex_coords: [1.0, 1.0],
-		},
-		Vertex {
-			position: [-1.0, 1.0, 1.0],
-			tex_coords: [0.0, 1.0],
-		},
-		// Back face
-		Vertex {
-			position: [-1.0, -1.0, -1.0],
-			tex_coords: [1.0, 0.0],
-		},
-		Vertex {
-			position: [1.0, -1.0, -1.0],
-			tex_coords: [0.0, 0.0],
-		},
-		Vertex {
-			position: [1.0, 1.0, -1.0],
-			tex_coords: [0.0, 1.0],
-		},
-		Vertex {
-			position: [-1.0, 1.0, -1.0],
-			tex_coords: [1.0, 1.0],
-		},
-		// Left face
-		Vertex {
-			position: [-1.0, -1.0, -1.0],
-			tex_coords: [0.0, 0.0],
-		},
-		Vertex {
-			position: [-1.0, -1.0, 1.0],
-			tex_coords: [1.0, 0.0],
-		},
-		Vertex {
-			position: [-1.0, 1.0, 1.0],
-			tex_coords: [1.0, 1.0],
-		},
-		Vertex {
-			position: [-1.0, 1.0, -1.0],
-			tex_coords: [0.0, 1.0],
-		},
-		// Right face
-		Vertex {
-			position: [1.0, -1.0, -1.0],
-			tex_coords: [1.0, 0.0],
-		},
-		Vertex {
-			position: [1.0, -1.0, 1.0],
-			tex_coords: [0.0, 0.0],
-		},
-		Vertex {
-			position: [1.0, 1.0, 1.0],
-			tex_coords: [0.0, 1.0],
-		},
-		Vertex {
-			position: [1.0, 1.0, -1.0],
-			tex_coords: [1.0, 1.0],
-		},
-		// Top face
-		Vertex {
-			position: [-1.0, 1.0, -1.0],
-			tex_coords: [0.0, 1.0],
-		},
-		Vertex {
-			position: [-1.0, 1.0, 1.0],
-			tex_coords: [0.0, 0.0],
-		},
-		Vertex {
-			position: [1.0, 1.0, 1.0],
-			tex_coords: [1.0, 0.0],
-		},
-		Vertex {
-			position: [1.0, 1.0, -1.0],
-			tex_coords: [1.0, 1.0],
-		},
-		// Bottom face
-		Vertex {
-			position: [-1.0, -1.0, -1.0],
-			tex_coords: [1.0, 1.0],
-		},
-		Vertex {
-			position: [-1.0, -1.0, 1.0],
-			tex_coords: [1.0, 0.0],
-		},
-		Vertex {
-			position: [1.0, -1.0, 1.0],
-			tex_coords: [0.0, 0.0],
-		},
-		Vertex {
-			position: [1.0, -1.0, -1.0],
-			tex_coords: [0.0, 1.0],
-		},
+impl InstanceRaw {
+	const VERTICES: [wgpu::VertexAttribute; 4] = wgpu::vertex_attr_array![
+		5 => Float32x4,
+		6 => Float32x4,
+		7 => Float32x4,
+		8 => Float32x4,
 	];
 
-	pub const INDICES: &[u16] = &[
-		// Front face
-		0, 1, 2, 0, 2, 3, // Back face
-		4, 5, 6, 4, 6, 7, // Left face
-		8, 9, 10, 8, 10, 11, // Right face
-		12, 13, 14, 12, 14, 15, // Top face
-		16, 17, 18, 16, 18, 19, // Bottom face
-		20, 21, 22, 20, 22, 23,
-	];
+	fn desc() -> wgpu::VertexBufferLayout<'static> {
+		use std::mem;
+		wgpu::VertexBufferLayout {
+			array_stride: mem::size_of::<InstanceRaw>() as wgpu::BufferAddress,
+			step_mode: wgpu::VertexStepMode::Instance,
+			attributes: &Self::VERTICES,
+		}
+	}
 }
 
 struct State {
@@ -193,9 +65,6 @@ struct State {
 	render_pipeline: wgpu::RenderPipeline,
 	config: wgpu::SurfaceConfiguration,
 
-	vertex_buffer: wgpu::Buffer,
-	index_buffer: wgpu::Buffer,
-	num_indices: u32,
 	diffuse_bind_group: wgpu::BindGroup,
 	diffuse_texture: texture::Texture,
 
@@ -203,7 +72,21 @@ struct State {
 	camera_buffer: wgpu::Buffer,
 	camera_bind_group: wgpu::BindGroup,
 	camera_uniform: camera::CameraUniform,
+	camera_controller: camera::CameraController,
+
+	depth_texture: texture::Texture,
+
+	instances: Vec<Instance>,
+	instance_buffer: wgpu::Buffer,
+	obj_model: model::Model,
 }
+
+const NUM_INSTANCES_PER_ROW: u32 = 10;
+const INSTANCE_DISPLACEMENT: Vec3 = Vec3::new(
+	NUM_INSTANCES_PER_ROW as f32 * 0.5,
+	0.0,
+	NUM_INSTANCES_PER_ROW as f32 * 0.5,
+);
 
 impl State {
 	async fn new(window: Window) -> Self {
@@ -246,20 +129,38 @@ impl State {
 			.unwrap();
 		surface.configure(&device, &config);
 
-		let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-			label: Some("Vertex Buffer"),
-			contents: bytemuck::cast_slice(triangle::VERTICES),
-			usage: wgpu::BufferUsages::VERTEX,
-		});
-
-		let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-			label: Some("Index Buffer"),
-			contents: bytemuck::cast_slice(triangle::INDICES),
-			usage: wgpu::BufferUsages::INDEX,
-		});
+		let depth_texture =
+			texture::Texture::create_depth_texture(&device, &config, "depth_texture");
 
 		// Load the shaders from disk
 		let shader = device.create_shader_module(wgpu::include_wgsl!("../shaders/triangle.wgsl"));
+
+		const SPACE_BETWEEN: f32 = 3.0;
+		let instances = (0..NUM_INSTANCES_PER_ROW)
+			.flat_map(|z| {
+				(0..NUM_INSTANCES_PER_ROW).map(move |x| {
+					let x = SPACE_BETWEEN * (x as f32 - NUM_INSTANCES_PER_ROW as f32 / 2.0);
+					let z = SPACE_BETWEEN * (z as f32 - NUM_INSTANCES_PER_ROW as f32 / 2.0);
+
+					let position = Vec3 { x, y: 0.0, z };
+
+					let rotation = if position == Vec3::ZERO {
+						Quat::from_axis_angle(Vec3::Z, 0.0)
+					} else {
+						Quat::from_axis_angle(position.normalize(), 45f32.to_radians())
+					};
+
+					Instance { position, rotation }
+				})
+			})
+			.collect::<Vec<_>>();
+
+		let instance_data = instances.iter().map(Instance::to_raw).collect::<Vec<_>>();
+		let instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+			label: Some("Instance Buffer"),
+			contents: bytemuck::cast_slice(&instance_data),
+			usage: wgpu::BufferUsages::VERTEX,
+		});
 
 		let texture_bind_group_layout =
 			device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -334,7 +235,7 @@ impl State {
 			vertex: wgpu::VertexState {
 				module: &shader,
 				entry_point: "vs_main",
-				buffers: &[Vertex::desc()],
+				buffers: &[model::Vertex::desc(), InstanceRaw::desc()],
 				compilation_options: Default::default(),
 			},
 			fragment: Some(wgpu::FragmentState {
@@ -352,10 +253,25 @@ impl State {
 				polygon_mode: wgpu::PolygonMode::Fill,
 				unclipped_depth: false,
 			},
-			depth_stencil: None,
+			depth_stencil: Some(wgpu::DepthStencilState {
+				format: texture::Texture::DEPTH_FORMAT,
+				depth_write_enabled: true,
+				depth_compare: wgpu::CompareFunction::Less,
+				stencil: wgpu::StencilState::default(),
+				bias: wgpu::DepthBiasState::default(),
+			}),
 			multisample: wgpu::MultisampleState::default(),
 			multiview: None,
 		});
+
+		let obj_model = model::Model::from_path(
+			"models/cube/cube.obj",
+			&device,
+			&queue,
+			&texture_bind_group_layout,
+		)
+		.await
+		.unwrap();
 
 		let diffuse_bytes = include_bytes!("../tree.png");
 		let diffuse_texture =
@@ -383,9 +299,6 @@ impl State {
 			surface,
 			render_pipeline,
 			config,
-			vertex_buffer,
-			index_buffer,
-			num_indices: triangle::INDICES.len() as u32,
 			diffuse_bind_group,
 			diffuse_texture,
 
@@ -393,6 +306,13 @@ impl State {
 			camera_buffer,
 			camera_bind_group,
 			camera_uniform,
+			camera_controller: camera::CameraController::new(0.2),
+
+			depth_texture,
+
+			instances,
+			instance_buffer,
+			obj_model,
 		}
 	}
 
@@ -423,17 +343,24 @@ impl State {
 					store: wgpu::StoreOp::Store,
 				},
 			})],
-			depth_stencil_attachment: None,
+			depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+				view: &self.depth_texture.view,
+				depth_ops: Some(wgpu::Operations {
+					load: wgpu::LoadOp::Clear(1.0),
+					store: wgpu::StoreOp::Store,
+				}),
+				stencil_ops: None,
+			}),
 			timestamp_writes: None,
 			occlusion_query_set: None,
 		});
 
+		rpass.set_vertex_buffer(1, self.instance_buffer.slice(..));
 		rpass.set_pipeline(&self.render_pipeline);
 		rpass.set_bind_group(0, &self.diffuse_bind_group, &[]);
 		rpass.set_bind_group(1, &self.camera_bind_group, &[]);
-		rpass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-		rpass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-		rpass.draw_indexed(0..self.num_indices, 0, 0..1);
+
+		rpass.draw_mesh_instanced(&self.obj_model.meshes[0], 0..self.instances.len() as u32);
 
 		drop(rpass);
 
@@ -468,11 +395,24 @@ impl ApplicationHandler for App {
 			return;
 		}
 
+		if state.camera_controller.process_events(&event) {
+			state.camera_controller.update_camera(&mut state.camera);
+			state.camera_uniform.update_view_proj(&state.camera);
+			state.queue.write_buffer(
+				&state.camera_buffer,
+				0,
+				bytemuck::cast_slice(&[state.camera_uniform]),
+			);
+
+			return;
+		}
+
 		match event {
 			WindowEvent::Resized(size) => {
 				state.resize(size);
 			}
 			WindowEvent::RedrawRequested => {
+				state.window.request_redraw();
 				state.render().unwrap();
 			}
 			WindowEvent::CloseRequested => {
