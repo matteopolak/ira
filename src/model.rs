@@ -79,19 +79,21 @@ impl Model {
 	where
 		P: AsRef<Path> + fmt::Display + fmt::Debug,
 	{
-		let gltf = Gltf::open(path)?;
+		let gltf = Gltf::open(path.as_ref())?;
 
 		let mut materials = Vec::new();
-
-		let textures = gltf.textures().collect::<Vec<_>>();
 
 		for material in gltf.materials() {
 			let diffuse_texture = material
 				.pbr_metallic_roughness()
 				.base_color_texture()
-				.map(|t| textures[t.texture().index()]);
+				.map(|t| t.texture().source());
+			let Some(diffuse_texture) = diffuse_texture else {
+				continue;
+			};
+
 			let diffuse_texture =
-				texture::Texture::from_path(device, queue, &diffuse_texture, "mat texture")?;
+				texture::Texture::from_image(device, queue, diffuse_texture, Some("mat texture"))?;
 
 			let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
 				layout,
@@ -115,7 +117,14 @@ impl Model {
 			});
 		}
 
-		let buffers = gltf.buffers().collect::<Vec<_>>();
+		let buffers = gltf
+			.buffers()
+			.map(|b| {
+				let data = gltf::buffer::Data::from_source(b.source(), None)?;
+
+				Ok(data.0)
+			})
+			.collect::<Result<Vec<_>, anyhow::Error>>()?;
 
 		let mut meshes = Vec::new();
 
@@ -159,7 +168,7 @@ impl Model {
 				vertex_buffer,
 				index_buffer,
 				num_elements: indices.len() as u32,
-				material: mesh.m,
+				material: mesh.index(),
 			});
 		}
 

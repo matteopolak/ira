@@ -4,15 +4,15 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-anyhow = "1.0.86"
-bytemuck = { version = "1.16.0", features = ["derive"] }
+anyhow = "1"
+bytemuck = { version = "1", features = ["derive"] }
 env_logger = "0.11"
-glam = "0.27.0"
-gltf = "1.4.1"
-image = "0.25.1"
+glam = "0.27"
+gltf = { version = "1", features = ["import"] }
+image = "0.25"
 log = "0.4"
 pollster = "0.3"
-tobj = { version = "4.0.2", features = ["async"] }
+tobj = { version = "4", features = ["async"] }
 wgpu = "0.20"
 winit = "0.30"
 
