@@ -18,9 +18,9 @@ pub struct Camera {
 impl Camera {
 	pub fn new(width: f32, height: f32) -> Self {
 		Self {
-			eye: Vec3::new(0.0, 100.0, 200.0),
+			eye: Vec3::new(0.0, 1.0, 2.0),
 			target: Vec3::ZERO,
-			up: Vec3::Y,
+			up: Vec3::Z,
 			aspect_ratio: width / height,
 			fovy: 40.0,
 			znear: 0.1,
@@ -45,6 +45,8 @@ impl Camera {
 #[derive(Copy, Clone, Debug, Pod, Zeroable)]
 pub struct CameraUniform {
 	view_proj: [[f32; 4]; 4],
+	pub view_pos: [f32; 3],
+	_padding: u32,
 }
 
 impl CameraUniform {
@@ -53,6 +55,8 @@ impl CameraUniform {
 
 		Self {
 			view_proj: vp_matrix.to_cols_array_2d(),
+			view_pos: camera.eye.into(),
+			_padding: 0,
 		}
 	}
 

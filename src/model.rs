@@ -8,17 +8,18 @@ use std::{
 };
 
 use bytemuck::{Pod, Zeroable};
+use glam::Vec3;
 use gltf::Gltf;
 use wgpu::util::DeviceExt;
 
-use crate::texture;
+use crate::texture::{self, Material};
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, Pod, Zeroable)]
 pub struct Vertex {
 	pub position: [f32; 3],
-	pub normal: [f32; 3],
 	pub tex_coords: [f32; 2],
+	pub normal: [f32; 3],
 }
 
 impl Vertex {
@@ -43,14 +44,8 @@ pub struct Meshes {
 #[derive(Debug)]
 pub struct Model {
 	pub meshes: Meshes,
-	pub materials: Vec<Material>,
-}
-
-#[derive(Debug)]
-pub struct Material {
-	pub name: String,
-	pub texture: texture::Texture,
-	pub bind_group: wgpu::BindGroup,
+	pub materials: Vec<GpuMaterial>,
+	pub centroid: Vec3,
 }
 
 #[derive(Debug)]
@@ -60,6 +55,12 @@ pub struct Mesh {
 	pub index_buffer: wgpu::Buffer,
 	pub num_elements: u32,
 	pub material: usize,
+}
+
+#[derive(Debug)]
+pub struct GpuMaterial {
+	material: Material,
+	bind_group: wgpu::BindGroup,
 }
 
 impl Model {
@@ -97,27 +98,11 @@ impl Model {
 		let mut materials = Vec::new();
 
 		for material in gltf.materials() {
-			let diffuse_texture =
-				texture::Texture::from_gltf_material(device, queue, &material, root)?;
+			let material = texture::Material::from_gltf_material(device, queue, &material, root)?;
+			let bind_group = material.create_bind_group(device, layout);
 
-			let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-				layout,
-				entries: &[
-					wgpu::BindGroupEntry {
-						binding: 0,
-						resource: wgpu::BindingResource::TextureView(&diffuse_texture.view),
-					},
-					wgpu::BindGroupEntry {
-						binding: 1,
-						resource: wgpu::BindingResource::Sampler(&diffuse_texture.sampler),
-					},
-				],
-				label: None,
-			});
-
-			materials.push(Material {
-				name: material.name().unwrap_or_default().to_string(),
-				texture: diffuse_texture,
+			materials.push(GpuMaterial {
+				material,
 				bind_group,
 			});
 		}
@@ -131,6 +116,9 @@ impl Model {
 			})
 			.collect::<Result<Vec<_>, anyhow::Error>>()
 			.unwrap();
+
+		let mut centroid = Vec3::ZERO;
+		let mut num_vertices = 0;
 
 		let mut meshes = Meshes::default();
 
@@ -155,6 +143,8 @@ impl Model {
 							normal,
 							tex_coords: tex_coord,
 						});
+
+						centroid += Vec3::from(position);
 					}
 				} else {
 					for (position, normal) in positions.zip(normals) {
@@ -163,8 +153,12 @@ impl Model {
 							normal,
 							tex_coords: [0.0, 0.0],
 						});
+
+						centroid += Vec3::from(position);
 					}
 				}
+
+				num_vertices += vertices.len();
 
 				let indices = reader
 					.read_indices()
@@ -191,7 +185,7 @@ impl Model {
 					material: material_index.unwrap_or(0),
 				};
 
-				if materials[mesh.material].texture.transparent {
+				if materials[mesh.material].material.transparent {
 					meshes.transparent.push(mesh);
 				} else {
 					meshes.opaque.push(mesh);
@@ -199,7 +193,13 @@ impl Model {
 			}
 		}
 
-		Ok(Model { meshes, materials })
+		centroid /= num_vertices as f32;
+
+		Ok(Model {
+			meshes,
+			materials,
+			centroid,
+		})
 	}
 
 	async fn from_path_obj<P>(
@@ -232,30 +232,17 @@ impl Model {
 		let mut materials = Vec::new();
 
 		for material in obj_materials? {
-			let diffuse_texture =
-				texture::Texture::from_obj_material(device, queue, &material, root)?;
+			let material = texture::Material::from_obj_material(device, queue, &material, root)?;
+			let bind_group = material.create_bind_group(device, layout);
 
-			let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-				layout,
-				entries: &[
-					wgpu::BindGroupEntry {
-						binding: 0,
-						resource: wgpu::BindingResource::TextureView(&diffuse_texture.view),
-					},
-					wgpu::BindGroupEntry {
-						binding: 1,
-						resource: wgpu::BindingResource::Sampler(&diffuse_texture.sampler),
-					},
-				],
-				label: None,
-			});
-
-			materials.push(Material {
-				name: material.name,
-				texture: diffuse_texture,
+			materials.push(GpuMaterial {
+				material,
 				bind_group,
 			});
 		}
+
+		let mut centroid = Vec3::ZERO;
+		let mut num_vertices = 0;
 
 		let mut meshes = Meshes::default();
 
@@ -263,23 +250,23 @@ impl Model {
 			let mesh = &model.mesh;
 			let vertices = (0..mesh.positions.len() / 3)
 				.map(|i| {
+					let position = [
+						mesh.positions[i * 3],
+						mesh.positions[i * 3 + 1],
+						mesh.positions[i * 3 + 2],
+					];
+
+					centroid += Vec3::from(position);
+
 					if mesh.normals.is_empty() {
 						Vertex {
-							position: [
-								mesh.positions[i * 3],
-								mesh.positions[i * 3 + 1],
-								mesh.positions[i * 3 + 2],
-							],
+							position,
 							tex_coords: [mesh.texcoords[i * 2], 1.0 - mesh.texcoords[i * 2 + 1]],
 							normal: [0.0, 0.0, 0.0],
 						}
 					} else {
 						Vertex {
-							position: [
-								mesh.positions[i * 3],
-								mesh.positions[i * 3 + 1],
-								mesh.positions[i * 3 + 2],
-							],
+							position,
 							tex_coords: [mesh.texcoords[i * 2], 1.0 - mesh.texcoords[i * 2 + 1]],
 							normal: [
 								mesh.normals[i * 3],
@@ -290,6 +277,8 @@ impl Model {
 					}
 				})
 				.collect::<Vec<_>>();
+
+			num_vertices += vertices.len();
 
 			let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
 				label: Some(&format!("{:?} Vertex Buffer", path)),
@@ -310,14 +299,20 @@ impl Model {
 				material: mesh.material_id.unwrap_or(0),
 			};
 
-			if materials[mesh.material].texture.transparent {
+			if materials[mesh.material].material.transparent {
 				meshes.transparent.push(mesh);
 			} else {
 				meshes.opaque.push(mesh);
 			}
 		}
 
-		Ok(Model { meshes, materials })
+		centroid /= num_vertices as f32;
+
+		Ok(Model {
+			meshes,
+			materials,
+			centroid,
+		})
 	}
 }
 
@@ -325,9 +320,10 @@ pub trait DrawModel<'a> {
 	fn draw_mesh_instanced(
 		&mut self,
 		mesh: &'a Mesh,
-		material: &'a Material,
+		material: &'a GpuMaterial,
 		instances: Range<u32>,
 		camera_bind_group: &'a wgpu::BindGroup,
+		light_bind_group: &'a wgpu::BindGroup,
 	);
 
 	fn draw_model_instanced(
@@ -335,6 +331,7 @@ pub trait DrawModel<'a> {
 		model: &'a Model,
 		instances: Range<u32>,
 		camera_bind_group: &'a wgpu::BindGroup,
+		light_bind_group: &'a wgpu::BindGroup,
 		transparent: bool,
 	) {
 		let meshes = if transparent {
@@ -346,7 +343,13 @@ pub trait DrawModel<'a> {
 		for mesh in meshes {
 			let material = &model.materials[mesh.material];
 
-			self.draw_mesh_instanced(mesh, material, instances.clone(), camera_bind_group);
+			self.draw_mesh_instanced(
+				mesh,
+				material,
+				instances.clone(),
+				camera_bind_group,
+				light_bind_group,
+			);
 		}
 	}
 }
@@ -358,14 +361,16 @@ where
 	fn draw_mesh_instanced(
 		&mut self,
 		mesh: &'b Mesh,
-		material: &'a Material,
+		material: &'a GpuMaterial,
 		instances: Range<u32>,
 		camera_bind_group: &'b wgpu::BindGroup,
+		light_bind_group: &'b wgpu::BindGroup,
 	) {
 		self.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
 		self.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
 		self.set_bind_group(0, &material.bind_group, &[]);
 		self.set_bind_group(1, camera_bind_group, &[]);
+		self.set_bind_group(2, light_bind_group, &[]);
 		self.draw_indexed(0..mesh.num_elements, 0, instances);
 	}
 }
