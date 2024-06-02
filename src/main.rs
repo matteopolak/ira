@@ -62,11 +62,9 @@ struct State {
 	device: wgpu::Device,
 	queue: wgpu::Queue,
 	surface: wgpu::Surface<'static>,
-	render_pipeline: wgpu::RenderPipeline,
+	opaque_render_pipeline: wgpu::RenderPipeline,
+	transparent_render_pipeline: wgpu::RenderPipeline,
 	config: wgpu::SurfaceConfiguration,
-
-	diffuse_bind_group: wgpu::BindGroup,
-	diffuse_texture: texture::Texture,
 
 	camera: camera::Camera,
 	camera_buffer: wgpu::Buffer,
@@ -78,15 +76,10 @@ struct State {
 
 	instances: Vec<Instance>,
 	instance_buffer: wgpu::Buffer,
-	obj_model: model::Model,
+	models: Vec<model::Model>,
 }
 
 const NUM_INSTANCES_PER_ROW: u32 = 10;
-const INSTANCE_DISPLACEMENT: Vec3 = Vec3::new(
-	NUM_INSTANCES_PER_ROW as f32 * 0.5,
-	0.0,
-	NUM_INSTANCES_PER_ROW as f32 * 0.5,
-);
 
 impl State {
 	async fn new(window: Window) -> Self {
@@ -227,45 +220,109 @@ impl State {
 		});
 
 		let swapchain_capabilities = surface.get_capabilities(&adapter);
-		let swapchain_format = swapchain_capabilities.formats[0];
-
-		let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-			label: None,
-			layout: Some(&pipeline_layout),
-			vertex: wgpu::VertexState {
-				module: &shader,
-				entry_point: "vs_main",
-				buffers: &[model::Vertex::desc(), InstanceRaw::desc()],
-				compilation_options: Default::default(),
-			},
-			fragment: Some(wgpu::FragmentState {
-				module: &shader,
-				entry_point: "fs_main",
-				compilation_options: Default::default(),
-				targets: &[Some(swapchain_format.into())],
+		let swapchain_format = wgpu::ColorTargetState {
+			format: swapchain_capabilities.formats[0],
+			blend: Some(wgpu::BlendState {
+				color: wgpu::BlendComponent {
+					src_factor: wgpu::BlendFactor::SrcAlpha,
+					dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+					operation: wgpu::BlendOperation::Add,
+				},
+				alpha: wgpu::BlendComponent {
+					src_factor: wgpu::BlendFactor::One,
+					dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+					operation: wgpu::BlendOperation::Add,
+				},
 			}),
-			primitive: wgpu::PrimitiveState {
-				conservative: false,
-				topology: wgpu::PrimitiveTopology::TriangleList,
-				strip_index_format: None,
-				front_face: wgpu::FrontFace::Ccw,
-				cull_mode: Some(wgpu::Face::Back),
-				polygon_mode: wgpu::PolygonMode::Fill,
-				unclipped_depth: false,
-			},
-			depth_stencil: Some(wgpu::DepthStencilState {
-				format: texture::Texture::DEPTH_FORMAT,
-				depth_write_enabled: true,
-				depth_compare: wgpu::CompareFunction::Less,
-				stencil: wgpu::StencilState::default(),
-				bias: wgpu::DepthBiasState::default(),
-			}),
-			multisample: wgpu::MultisampleState::default(),
-			multiview: None,
-		});
+			write_mask: wgpu::ColorWrites::COLOR,
+		};
 
-		let obj_model = model::Model::from_path(
-			"models/cube/cube.obj",
+		let transparent_render_pipeline =
+			device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+				label: None,
+				layout: Some(&pipeline_layout),
+				vertex: wgpu::VertexState {
+					module: &shader,
+					entry_point: "vs_main",
+					buffers: &[model::Vertex::desc(), InstanceRaw::desc()],
+					compilation_options: Default::default(),
+				},
+				fragment: Some(wgpu::FragmentState {
+					module: &shader,
+					entry_point: "fs_main",
+					compilation_options: Default::default(),
+					targets: &[Some(swapchain_format)],
+				}),
+				primitive: wgpu::PrimitiveState {
+					conservative: false,
+					topology: wgpu::PrimitiveTopology::TriangleList,
+					strip_index_format: None,
+					front_face: wgpu::FrontFace::Ccw,
+					cull_mode: Some(wgpu::Face::Back),
+					polygon_mode: wgpu::PolygonMode::Fill,
+					unclipped_depth: false,
+				},
+				depth_stencil: Some(wgpu::DepthStencilState {
+					format: texture::Texture::DEPTH_FORMAT,
+					depth_write_enabled: false,
+					depth_compare: wgpu::CompareFunction::Less,
+					stencil: wgpu::StencilState::default(),
+					bias: wgpu::DepthBiasState::default(),
+				}),
+				multisample: wgpu::MultisampleState {
+					count: 1,
+					mask: !0,
+					alpha_to_coverage_enabled: false,
+				},
+				multiview: None,
+			});
+
+		let opaque_render_pipeline =
+			device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+				label: None,
+				layout: Some(&pipeline_layout),
+				vertex: wgpu::VertexState {
+					module: &shader,
+					entry_point: "vs_main",
+					buffers: &[model::Vertex::desc(), InstanceRaw::desc()],
+					compilation_options: Default::default(),
+				},
+				fragment: Some(wgpu::FragmentState {
+					module: &shader,
+					entry_point: "fs_main",
+					compilation_options: Default::default(),
+					targets: &[Some(wgpu::ColorTargetState {
+						format: swapchain_capabilities.formats[0],
+						blend: None,
+						write_mask: wgpu::ColorWrites::ALL,
+					})],
+				}),
+				primitive: wgpu::PrimitiveState {
+					conservative: false,
+					topology: wgpu::PrimitiveTopology::TriangleList,
+					strip_index_format: None,
+					front_face: wgpu::FrontFace::Ccw,
+					cull_mode: Some(wgpu::Face::Back),
+					polygon_mode: wgpu::PolygonMode::Fill,
+					unclipped_depth: false,
+				},
+				depth_stencil: Some(wgpu::DepthStencilState {
+					format: texture::Texture::DEPTH_FORMAT,
+					depth_write_enabled: true,
+					depth_compare: wgpu::CompareFunction::Less,
+					stencil: wgpu::StencilState::default(),
+					bias: wgpu::DepthBiasState::default(),
+				}),
+				multisample: wgpu::MultisampleState {
+					count: 1,
+					mask: !0,
+					alpha_to_coverage_enabled: false,
+				},
+				multiview: None,
+			});
+
+		let model = model::Model::from_path(
+			"models/gelatinous_cube/scene.gltf",
 			&device,
 			&queue,
 			&texture_bind_group_layout,
@@ -273,47 +330,27 @@ impl State {
 		.await
 		.unwrap();
 
-		let diffuse_bytes = include_bytes!("../tree.png");
-		let diffuse_texture =
-			texture::Texture::from_bytes(&device, &queue, diffuse_bytes, Some("happy-tree.png"))
-				.unwrap();
-
-		let diffuse_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-			layout: &texture_bind_group_layout,
-			entries: &[
-				wgpu::BindGroupEntry {
-					binding: 0,
-					resource: wgpu::BindingResource::TextureView(&diffuse_texture.view),
-				},
-				wgpu::BindGroupEntry {
-					binding: 1,
-					resource: wgpu::BindingResource::Sampler(&diffuse_texture.sampler),
-				},
-			],
-			label: Some("diffuse_bind_group"),
-		});
-
 		Self {
 			window,
 			device,
 			queue,
 			surface,
-			render_pipeline,
 			config,
-			diffuse_bind_group,
-			diffuse_texture,
+
+			opaque_render_pipeline,
+			transparent_render_pipeline,
 
 			camera,
 			camera_buffer,
 			camera_bind_group,
 			camera_uniform,
-			camera_controller: camera::CameraController::new(0.2),
+			camera_controller: camera::CameraController::new(2.),
 
 			depth_texture,
 
 			instances,
 			instance_buffer,
-			obj_model,
+			models: vec![model],
 		}
 	}
 
@@ -326,6 +363,8 @@ impl State {
 	}
 
 	fn render(&self) -> Result<(), wgpu::SurfaceError> {
+		let start = std::time::Instant::now();
+
 		let frame = self.surface.get_current_texture()?;
 		let view = frame
 			.texture
@@ -357,16 +396,59 @@ impl State {
 		});
 
 		rpass.set_vertex_buffer(1, self.instance_buffer.slice(..));
-		rpass.set_pipeline(&self.render_pipeline);
-		rpass.set_bind_group(0, &self.diffuse_bind_group, &[]);
-		rpass.set_bind_group(1, &self.camera_bind_group, &[]);
+		rpass.set_pipeline(&self.opaque_render_pipeline);
 
-		rpass.draw_mesh_instanced(&self.obj_model.meshes[0], 0..self.instances.len() as u32);
+		for model in &self.models {
+			rpass.draw_model_instanced(
+				model,
+				0..self.instances.len() as u32,
+				&self.camera_bind_group,
+				false,
+			);
+		}
+
+		drop(rpass);
+
+		let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+			label: None,
+			color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+				view: &view,
+				resolve_target: None,
+				ops: wgpu::Operations {
+					load: wgpu::LoadOp::Load,
+					store: wgpu::StoreOp::Store,
+				},
+			})],
+			depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+				view: &self.depth_texture.view,
+				depth_ops: Some(wgpu::Operations {
+					load: wgpu::LoadOp::Load,
+					store: wgpu::StoreOp::Store,
+				}),
+				stencil_ops: None,
+			}),
+			timestamp_writes: None,
+			occlusion_query_set: None,
+		});
+
+		rpass.set_vertex_buffer(1, self.instance_buffer.slice(..));
+		rpass.set_pipeline(&self.transparent_render_pipeline);
+
+		for model in &self.models {
+			rpass.draw_model_instanced(
+				model,
+				0..self.instances.len() as u32,
+				&self.camera_bind_group,
+				true,
+			);
+		}
 
 		drop(rpass);
 
 		self.queue.submit(Some(encoder.finish()));
 		frame.present();
+
+		log::info!("Frame time: {:?}", start.elapsed());
 
 		Ok(())
 	}
@@ -415,6 +497,9 @@ impl ApplicationHandler for App {
 			WindowEvent::RedrawRequested => {
 				state.window.request_redraw();
 				state.render().unwrap();
+
+				// sleep for 10ms
+				std::thread::sleep(std::time::Duration::from_millis(10));
 			}
 			WindowEvent::CloseRequested => {
 				event_loop.exit();

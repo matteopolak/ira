@@ -18,7 +18,7 @@ pub struct Camera {
 impl Camera {
 	pub fn new(width: f32, height: f32) -> Self {
 		Self {
-			eye: Vec3::new(0.0, 10.0, 20.0),
+			eye: Vec3::new(0.0, 100.0, 200.0),
 			target: Vec3::ZERO,
 			up: Vec3::Y,
 			aspect_ratio: width / height,

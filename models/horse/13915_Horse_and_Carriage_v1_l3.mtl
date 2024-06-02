@@ -1,0 +1,74 @@
+# 3ds Max Wavefront OBJ Exporter v0.97b - (c)2007 guruware
+# File Created: 15.03.2012 14:07:54
+
+newmtl Horse_reins_leather
+	Ns 26.0000
+	Ni 1.5000
+	d 1.0000
+	Tr 0.0000
+	Tf 1.0000 1.0000 1.0000 
+	illum 2
+	Ka 1.0000 1.0000 1.0000
+	Kd 1.0000 1.0000 1.0000
+	Ks 0.3240 0.3240 0.3240
+	Ke 0.0000 0.0000 0.0000
+	map_Ka Horse_reins_diff.jpg
+	map_Kd Horse_reins_diff.jpg
+
+newmtl horse
+	Ns 20.0000
+	Ni 1.5000
+	d 1.0000
+	Tr 0.0000
+	Tf 1.0000 1.0000 1.0000 
+	illum 2
+	Ka 0.5882 0.5882 0.5882
+	Kd 0.5882 0.5882 0.5882
+	Ks 0.2610 0.2610 0.2610
+	Ke 0.0000 0.0000 0.0000
+	map_Ka Horse_diff.jpg
+	map_Kd Horse_diff.jpg
+	map_bump Horse_bump.jpg
+	bump Horse_bump.jpg
+
+newmtl Carriage
+	Ns 32.0000
+	Ni 1.5000
+	d 1.0000
+	Tr 0.0000
+	Tf 1.0000 1.0000 1.0000 
+	illum 2
+	Ka 1.0000 1.0000 1.0000
+	Kd 1.0000 1.0000 1.0000
+	Ks 0.1400 0.1400 0.1400
+	Ke 0.0000 0.0000 0.0000
+	map_Ka Carriage_diff.jpg
+	map_Kd Carriage_diff.jpg
+
+newmtl baked_horse
+	Ns 20.0000
+	Ni 1.5000
+	d 1.0000
+	Tr 0.0000
+	Tf 1.0000 1.0000 1.0000 
+	illum 2
+	Ka 1.0000 1.0000 1.0000
+	Kd 1.0000 1.0000 1.0000
+	Ks 0.2610 0.2610 0.2610
+	Ke 0.0000 0.0000 0.0000
+	map_Ka Horse_diff.jpg
+	map_Kd Horse_diff.jpg
+
+newmtl Horse_reins_metal
+	Ns 35.0000
+	Ni 1.5000
+	d 1.0000
+	Tr 0.0000
+	Tf 1.0000 1.0000 1.0000 
+	illum 2
+	Ka 1.0000 1.0000 1.0000
+	Kd 1.0000 1.0000 1.0000
+	Ks 0.5850 0.5850 0.5850
+	Ke 0.0000 0.0000 0.0000
+	map_Ka Horse_reins_diff.jpg
+	map_Kd Horse_reins_diff.jpg
