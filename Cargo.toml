@@ -1,5 +1,6 @@
 [package]
-name = "lumina"
+name = "ira"
+authors = ["Matthew Polak <git@matteopolak.com>"]
 version = "0.1.0"
 edition = "2021"
 

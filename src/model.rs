@@ -18,19 +18,38 @@ use crate::texture::{self, Material};
 #[derive(Copy, Clone, Debug, Pod, Zeroable)]
 pub struct Vertex {
 	pub position: [f32; 3],
-	pub tex_coords: [f32; 2],
+	_padding: u32,
 	pub normal: [f32; 3],
+	_padding2: u32,
+	pub tex_coords: [f32; 2],
+	pub diffuse_tex_coords: [f32; 2],
 }
 
 impl Vertex {
-	const VERTICES: [wgpu::VertexAttribute; 3] =
-		wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x2, 2 => Float32x3];
+	const VERTICES: [wgpu::VertexAttribute; 4] =
+		wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Float32x2, 3 => Float32x2];
 
 	pub fn desc() -> wgpu::VertexBufferLayout<'static> {
 		wgpu::VertexBufferLayout {
 			array_stride: mem::size_of::<Vertex>() as wgpu::BufferAddress,
 			step_mode: wgpu::VertexStepMode::Vertex,
 			attributes: &Self::VERTICES,
+		}
+	}
+
+	pub fn new(
+		position: [f32; 3],
+		tex_coords: [f32; 2],
+		diffuse_tex_coords: [f32; 2],
+		normal: [f32; 3],
+	) -> Self {
+		Self {
+			position,
+			_padding: 0,
+			tex_coords,
+			_padding2: 0,
+			diffuse_tex_coords,
+			normal,
 		}
 	}
 }
@@ -128,31 +147,48 @@ impl Model {
 
 				let reader = primitive.reader(|buffer| Some(&buffers[buffer.index()]));
 
+				let material_index = primitive.material().index();
+				let material = &materials[material_index.unwrap_or(0)];
+
 				let positions = reader.read_positions().unwrap();
 				let normals = reader.read_normals().unwrap();
-				let tex_coords = reader.read_tex_coords(0);
-
-				let material_index = primitive.material().index();
+				let tex_coords =
+					reader.read_tex_coords(material.material.normal.tex_coord.unwrap_or(0));
+				let diffuse_tex_coords =
+					reader.read_tex_coords(material.material.diffuse.tex_coord.unwrap_or(0));
 
 				if let Some(tex_coords) = tex_coords {
-					for ((position, normal), tex_coord) in
-						positions.zip(normals).zip(tex_coords.into_f32())
-					{
-						vertices.push(Vertex {
-							position,
-							normal,
-							tex_coords: tex_coord,
-						});
+					if let Some(diffuse_tex_coords) = diffuse_tex_coords {
+						for (((position, normal), tex_coord), diffuse_tex_coord) in positions
+							.zip(normals)
+							.zip(tex_coords.into_f32())
+							.zip(diffuse_tex_coords.into_f32())
+						{
+							vertices.push(Vertex::new(
+								position,
+								tex_coord,
+								diffuse_tex_coord,
+								normal,
+							));
 
-						centroid += Vec3::from(position);
+							if material_index == Some(8) {
+								println!("{:?}", diffuse_tex_coord);
+							}
+
+							centroid += Vec3::from(position);
+						}
+					} else {
+						for ((position, normal), tex_coord) in
+							positions.zip(normals).zip(tex_coords.into_f32())
+						{
+							vertices.push(Vertex::new(position, tex_coord, tex_coord, normal));
+
+							centroid += Vec3::from(position);
+						}
 					}
 				} else {
 					for (position, normal) in positions.zip(normals) {
-						vertices.push(Vertex {
-							position,
-							normal,
-							tex_coords: [0.0, 0.0],
-						});
+						vertices.push(Vertex::new(position, [0.0, 0.0], [0.0, 0.0], normal));
 
 						centroid += Vec3::from(position);
 					}
@@ -258,7 +294,7 @@ impl Model {
 
 					centroid += Vec3::from(position);
 
-					if mesh.normals.is_empty() {
+					/*if mesh.normals.is_empty() {
 						Vertex {
 							position,
 							tex_coords: [mesh.texcoords[i * 2], 1.0 - mesh.texcoords[i * 2 + 1]],
@@ -274,7 +310,7 @@ impl Model {
 								mesh.normals[i * 3 + 2],
 							],
 						}
-					}
+					}*/
 				})
 				.collect::<Vec<_>>();
 

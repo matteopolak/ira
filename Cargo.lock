@@ -1016,6 +1016,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "ira"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bytemuck",
+ "env_logger",
+ "glam",
+ "gltf",
+ "image",
+ "log",
+ "pollster",
+ "tobj",
+ "wgpu",
+ "winit",
+]
+
+[[package]]
 name = "is_terminal_polyfill"
 version = "1.70.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1194,23 +1211,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0fae87c125b03c1d2c0150c90365d7d6bcc53fb73a9acaef207d2d065860f062"
 dependencies = [
  "imgref",
-]
-
-[[package]]
-name = "lumina"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "bytemuck",
- "env_logger",
- "glam",
- "gltf",
- "image",
- "log",
- "pollster",
- "tobj",
- "wgpu",
- "winit",
 ]
 
 [[package]]
