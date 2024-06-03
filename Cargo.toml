@@ -1,7 +1,8 @@
 [package]
 name = "ira"
 authors = ["Matthew Polak <git@matteopolak.com>"]
-version = "0.1.0"
+description = "A general-purpose, code-first game engine."
+version = "0.0.1"
 edition = "2021"
 
 [dependencies]
