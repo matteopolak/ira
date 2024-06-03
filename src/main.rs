@@ -1,7 +1,4 @@
-mod camera;
-mod light;
-mod model;
-mod texture;
+pub use ira::*;
 
 use std::sync::Arc;
 
