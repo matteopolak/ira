@@ -1,4 +1,4 @@
-use ira::{glam::Vec3, winit, App, Model};
+use ira::{glam::Vec3, pollster, winit, App, Model};
 
 fn main() -> Result<(), winit::error::EventLoopError> {
 	env_logger::init();
