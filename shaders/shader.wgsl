@@ -69,8 +69,10 @@ fn vs_main(model: VertexInput) -> VertexOutput {
 @group(0) @binding(6) var t_ao: texture_2d<f32>;
 @group(0) @binding(7) var s_ao: sampler;
 
+@group(0) @binding(8) var<uniform> has_normal: f32;
+
 const pi = radians(180.0);
-const ambient_intensity = 1.0;
+const ambient_intensity = 0.1;
 
 fn geometry_schlick_ggx(n_dot_v: f32, k: f32) -> f32 {
 	let numerator = n_dot_v;
@@ -114,13 +116,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 	let metallic = metallic_roughness.b;
 
 	// [0, 1] to [-1, 1]
-	let tangent_normal = normalize(bump * 2.0 - 1.0);
-	let tbn = mat3x3<f32>(
-		normalize(in.world_tangent),
-		normalize(in.world_bitangent),
-		normalize(in.world_normal)
-	);
-	let normal = normalize(tbn * tangent_normal);
+	let normal = normalize((in.world_normal * (1.0 - has_normal) + bump * has_normal));
 	let ambient = ambient_intensity * albedo.rgb * ao;
 
 	// Reflectance at normal incidence (F0)
@@ -153,5 +149,5 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 	// Combine components
 	let final_color = (diffuse + specular) * radiance * n_dot_l + ambient;
 
-	return vec4<f32>(final_color, albedo.a);
+	return vec4<f32>(normal, 1.0);
 }

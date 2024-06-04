@@ -83,13 +83,14 @@ impl Model {
 		device: &wgpu::Device,
 		queue: &wgpu::Queue,
 		layout: &wgpu::BindGroupLayout,
+		up: Vec3,
 	) -> anyhow::Result<Self>
 	where
 		P: AsRef<Path> + fmt::Debug,
 	{
 		match path.as_ref().extension().and_then(|s| s.to_str()) {
 			Some("obj") => Self::from_path_obj(path, device, queue, layout).await,
-			Some("gltf") => Self::from_path_gltf(path, device, queue, layout).await,
+			Some("gltf") => Self::from_path_gltf(path, device, queue, layout, up).await,
 			_ => Err(anyhow::anyhow!("Unsupported model format")),
 		}
 	}
@@ -104,6 +105,7 @@ impl Model {
 		device: &wgpu::Device,
 		queue: &wgpu::Queue,
 		layout: &wgpu::BindGroupLayout,
+		up: Vec3,
 	) -> anyhow::Result<Self>
 	where
 		P: AsRef<Path> + fmt::Debug,
@@ -156,19 +158,28 @@ impl Model {
 					.ok_or_else(|| anyhow::anyhow!("mesh primitive does not have normals"))?;
 				let tex_coords = reader.read_tex_coords(0);
 
+				// rotate them to that `up` is now Vec3::Y
+				let rotation = glam::Quat::from_rotation_arc(up, Vec3::Y);
+				let positions = positions.map(|p| rotation.mul_vec3(p.into()));
+				let normals = normals.map(|n| rotation.mul_vec3(n.into()));
+
 				if let Some(tex_coords) = tex_coords {
 					for ((position, normal), tex_coord) in
 						positions.zip(normals).zip(tex_coords.into_f32())
 					{
-						vertices.push(Vertex::new(position, normal, tex_coord.map(f32::fract)));
+						vertices.push(Vertex::new(
+							position.into(),
+							normal.into(),
+							tex_coord.map(f32::fract),
+						));
 
-						centroid += Vec3::from(position);
+						centroid += position;
 					}
 				} else {
 					for (position, normal) in positions.zip(normals) {
-						vertices.push(Vertex::new(position, normal, [0.0, 0.0]));
+						vertices.push(Vertex::new(position.into(), normal.into(), [0.0, 0.0]));
 
-						centroid += Vec3::from(position);
+						centroid += position;
 					}
 				}
 

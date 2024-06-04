@@ -22,7 +22,7 @@ impl Projection {
 
 	#[must_use]
 	pub fn to_perspective_matrix(&self) -> Mat4 {
-		Mat4::perspective_rh(self.fovy.to_radians(), self.aspect, self.znear, self.zfar)
+		Mat4::perspective_rh(self.fovy, self.aspect, self.znear, self.zfar)
 	}
 }
 
@@ -38,9 +38,9 @@ impl CameraBuilder {
 	#[must_use]
 	pub fn new(width: f32, height: f32) -> Self {
 		Self {
-			position: Vec3::ZERO,
-			yaw: 0.0,
-			pitch: 0.0,
+			position: Vec3::new(-2.0, 0.0, 0.0),
+			yaw: 0f32.to_radians(),
+			pitch: 0f32.to_radians(),
 			projection: Projection {
 				aspect: width / height,
 				fovy: 40f32.to_radians(),
@@ -55,11 +55,12 @@ impl CameraBuilder {
 		let (sin_pitch, cos_pitch) = self.pitch.sin_cos();
 		let (sin_yaw, cos_yaw) = self.yaw.sin_cos();
 
-		Mat4::look_to_rh(
-			self.position,
-			self.position + Vec3::new(cos_pitch * cos_yaw, sin_pitch, cos_pitch * sin_yaw),
-			Vec3::Y,
-		) * self.projection.to_perspective_matrix()
+		self.projection.to_perspective_matrix()
+			* Mat4::look_to_rh(
+				self.position,
+				Vec3::new(cos_pitch * cos_yaw, sin_pitch, cos_pitch * sin_yaw).normalize(),
+				Vec3::Y,
+			)
 	}
 }
 
@@ -86,8 +87,8 @@ impl Camera {
 	fn update_view_proj(&mut self, camera: &CameraBuilder) {
 		let vp_matrix = camera.to_view_projection_matrix();
 
-		self.view_pos = camera.position.into();
 		self.view_proj = vp_matrix.to_cols_array_2d();
+		self.view_pos = camera.position.into();
 	}
 
 	pub fn create_on_device(self, device: &wgpu::Device) -> GpuCamera {
@@ -168,9 +169,9 @@ impl CameraController {
 			builder,
 			dir: Vec3::ZERO,
 			rot: Vec2::ZERO,
-			speed: 5.0,
+			speed: 1.0,
 			scroll: 0.0,
-			sensitivity: 0.003,
+			sensitivity: 0.5,
 			mouse_pressed: false,
 		}
 	}
@@ -204,9 +205,7 @@ impl CameraController {
 	}
 
 	pub fn process_mouse(&mut self, delta: (f32, f32)) {
-		if self.mouse_pressed {
-			self.rot += Vec2::from(delta);
-		}
+		self.rot = Vec2::from(delta);
 	}
 
 	pub fn process_scroll(&mut self, delta: &MouseScrollDelta) {
@@ -223,14 +222,14 @@ impl CameraController {
 	pub fn update(&mut self, delta: Duration) {
 		let dt = delta.as_secs_f32();
 
-		let (yaw_sin, yaw_cos) = self.rot.x.sin_cos();
+		let (yaw_sin, yaw_cos) = self.builder.yaw.sin_cos();
 		let forward = Vec3::new(yaw_cos, 0.0, yaw_sin).normalize();
-		let right = forward.cross(Vec3::Y).normalize();
+		let right = forward.cross(Vec3::Y);
 
 		self.builder.position += self.dir.z * forward * self.speed * dt;
 		self.builder.position += self.dir.x * right * self.speed * dt;
 
-		let (pitch_sin, pitch_cos) = self.rot.y.sin_cos();
+		let (pitch_sin, pitch_cos) = self.builder.pitch.sin_cos();
 		let scrollward = Vec3::new(pitch_cos * yaw_cos, pitch_sin, pitch_cos * yaw_sin).normalize();
 
 		self.builder.position += self.scroll * scrollward * self.speed * dt;
@@ -238,8 +237,8 @@ impl CameraController {
 
 		self.builder.position.y += self.dir.y * self.speed * dt;
 
-		self.builder.yaw += self.rot.x.to_radians() * self.sensitivity * dt;
-		self.builder.pitch += -self.rot.y.to_radians() * self.sensitivity * dt;
+		self.builder.yaw += self.rot.x * self.sensitivity * dt;
+		self.builder.pitch -= self.rot.y * self.sensitivity * dt;
 
 		self.rot = Vec2::ZERO;
 

@@ -19,7 +19,7 @@ impl Default for Light {
 			_padding: 0,
 			// warm yellow
 			color: [1.0, 0.9, 0.8],
-			intensity: 2.0,
+			intensity: 20.0,
 		}
 	}
 }
@@ -27,9 +27,10 @@ impl Default for Light {
 impl Light {
 	/// Creates a default Light, but the position is set to the
 	/// centroid of the model, with a large y value.
-	#[must_use] pub fn from_model(model: &Model) -> Self {
+	#[must_use]
+	pub fn from_model(model: &Model) -> Self {
 		let centroid = model.centroid;
-		let position = centroid + Vec3::Z * 10_000.0;
+		let position = centroid + Vec3::Y * 10_000.0 - Vec3::X * 5_000.0;
 
 		Self {
 			position: position.into(),
@@ -73,7 +74,8 @@ impl Light {
 		(bind_group, layout)
 	}
 
-	#[must_use] pub fn create_uniform_buffer(&self, device: &wgpu::Device) -> wgpu::Buffer {
+	#[must_use]
+	pub fn create_uniform_buffer(&self, device: &wgpu::Device) -> wgpu::Buffer {
 		device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
 			label: Some("light_uniform_buffer"),
 			contents: bytemuck::cast_slice(&[*self]),
@@ -81,7 +83,8 @@ impl Light {
 		})
 	}
 
-	#[must_use] pub fn create_on_device(self, device: &wgpu::Device) -> GpuLight {
+	#[must_use]
+	pub fn create_on_device(self, device: &wgpu::Device) -> GpuLight {
 		let buffer = self.create_uniform_buffer(device);
 		let (bind_group, bind_group_layout) = Self::create_bind_group(device, &buffer);
 

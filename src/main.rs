@@ -273,6 +273,17 @@ impl State {
 						ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
 						count: None,
 					},
+					// has_normal (f32)
+					wgpu::BindGroupLayoutEntry {
+						binding: 8,
+						visibility: wgpu::ShaderStages::FRAGMENT,
+						ty: wgpu::BindingType::Buffer {
+							ty: wgpu::BufferBindingType::Uniform,
+							has_dynamic_offset: false,
+							min_binding_size: None,
+						},
+						count: None,
+					},
 				],
 				label: Some("texture_bind_group_layout"),
 			});
@@ -286,6 +297,7 @@ impl State {
 			&device,
 			&queue,
 			&texture_bind_group_layout,
+			Vec3::Z,
 		)
 		.await
 		.unwrap();
@@ -476,7 +488,7 @@ impl ApplicationHandler for App {
 			.unwrap();
 
 		window.set_cursor_grab(CursorGrabMode::Locked).unwrap();
-		window.set_cursor_visible(false);
+		// window.set_cursor_visible(false);
 
 		let state = pollster::block_on(State::new(window));
 
@@ -518,6 +530,8 @@ impl ApplicationHandler for App {
 				app.resize(size);
 			}
 			WindowEvent::RedrawRequested => {
+				app.window.request_redraw();
+
 				let delta = app.last_frame.elapsed();
 
 				app.last_frame = time::Instant::now();

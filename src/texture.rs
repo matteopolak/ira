@@ -1,6 +1,7 @@
 use std::path::Path;
 
 use anyhow::{anyhow, Ok, Result};
+use wgpu::util::DeviceExt;
 
 #[derive(Debug)]
 pub struct Texture {
@@ -277,6 +278,7 @@ pub struct Material {
 	pub metallic_roughness: Texture,
 	pub ao: Texture,
 
+	pub has_normal: bool,
 	pub transparent: bool,
 }
 
@@ -286,7 +288,7 @@ impl Material {
 		let diffuse = Texture::new_solid(device, queue, [u8::MAX; 4]);
 		let normal = Texture::new_solid(device, queue, [128, 128, 255, 255]);
 		let metallic_roughness = Texture::new_solid(device, queue, [0, 0, 0, 255]);
-		let ao = Texture::new_solid(device, queue, [255, 255, 255, 255]);
+		let ao = Texture::new_solid(device, queue, [u8::MAX; 4]);
 
 		Self {
 			diffuse,
@@ -294,6 +296,7 @@ impl Material {
 			metallic_roughness,
 			ao,
 			transparent: false,
+			has_normal: false,
 		}
 	}
 
@@ -337,6 +340,18 @@ impl Material {
 				wgpu::BindGroupEntry {
 					binding: 7,
 					resource: wgpu::BindingResource::Sampler(&self.ao.sampler),
+				},
+				wgpu::BindGroupEntry {
+					binding: 8,
+					resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+						buffer: &device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+							label: Some("material has_normal"),
+							contents: bytemuck::cast_slice(&[f32::from(self.has_normal)]),
+							usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+						}),
+						offset: 0,
+						size: None,
+					}),
 				},
 			],
 			label: None,
@@ -407,11 +422,20 @@ impl Material {
 			.map(|t| t.texture().source())
 			.map(|s| gltf::image::Data::from_source(s.source(), Some(root), &[]))
 			.transpose()?;
-		let normal_texture = normal_texture.map_or_else(
-			|| Ok(Texture::new_solid(device, queue, [128, 128, 255, 255])),
+		let (has_normal, normal_texture) = normal_texture.map_or_else(
+			|| {
+				Ok((
+					false,
+					Texture::new_solid(device, queue, [128, 128, 255, 255]),
+				))
+			},
 			|t| {
-				Image::try_from(t)
-					.map(|i| Texture::from_image(device, queue, i, Some("normal map")))
+				Image::try_from(t).map(|i| {
+					(
+						true,
+						Texture::from_image(device, queue, i, Some("normal map")),
+					)
+				})
 			},
 		)?;
 
@@ -448,6 +472,7 @@ impl Material {
 			metallic_roughness: metallic_roughness_texture,
 			ao: ao_texture,
 			transparent: material.alpha_mode() == gltf::material::AlphaMode::Blend,
+			has_normal,
 		})
 	}
 
