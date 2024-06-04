@@ -1,9 +1,12 @@
-pub use ira::*;
+use crate::{
+	camera, light,
+	model::{self, DrawModel, Instance},
+	texture::{self, Material},
+};
 
 use std::{sync::Arc, time};
 
 use glam::Vec3;
-use model::{DrawModel, Instance};
 use winit::{
 	application::ApplicationHandler,
 	event::{DeviceEvent, KeyEvent, MouseButton, WindowEvent},
@@ -12,9 +15,30 @@ use winit::{
 	window::{CursorGrabMode, Fullscreen, Window, WindowAttributes, WindowId},
 };
 
-#[derive(Default)]
-struct App {
+pub struct App {
 	state: Option<State>,
+	on_ready: fn(&mut State),
+}
+
+impl App {
+	pub fn new(on_ready: fn(&mut State)) -> Self {
+		Self {
+			state: None,
+			on_ready,
+		}
+	}
+
+	/// Runs the application.
+	///
+	/// This function will block the current thread until the application is closed.
+	///
+	/// # Errors
+	/// See [`winit::error::EventLoopError`] for errors.
+	pub fn run(mut self) -> Result<(), winit::error::EventLoopError> {
+		let event_loop = EventLoop::new()?;
+
+		event_loop.run_app(&mut self)
+	}
 }
 
 fn create_render_pipeline(
@@ -64,12 +88,14 @@ fn create_render_pipeline(
 	})
 }
 
-struct State {
-	window: Arc<Window>,
-	device: wgpu::Device,
-	queue: wgpu::Queue,
-	surface: wgpu::Surface<'static>,
-	config: wgpu::SurfaceConfiguration,
+pub struct State {
+	pub window: Arc<Window>,
+	pub device: wgpu::Device,
+	pub queue: wgpu::Queue,
+	pub surface: wgpu::Surface<'static>,
+	pub config: wgpu::SurfaceConfiguration,
+
+	pub material_bind_group_layout: wgpu::BindGroupLayout,
 
 	opaque_render_pipeline: wgpu::RenderPipeline,
 	transparent_render_pipeline: wgpu::RenderPipeline,
@@ -77,7 +103,7 @@ struct State {
 	controller: camera::CameraController,
 
 	depth_texture: texture::Texture,
-	models: Vec<model::GpuModel>,
+	pub models: Vec<model::GpuModel>,
 
 	light: light::GpuLight,
 
@@ -87,11 +113,7 @@ struct State {
 impl State {
 	async fn new(window: Window) -> Self {
 		let window = Arc::new(window);
-
-		let mut size = window.inner_size();
-		size.width = size.width.max(1);
-		size.height = size.height.max(1);
-
+		let size = window.inner_size();
 		let instance = wgpu::Instance::default();
 
 		let surface = instance.create_surface(window.clone()).unwrap();
@@ -99,20 +121,17 @@ impl State {
 			.request_adapter(&wgpu::RequestAdapterOptions {
 				power_preference: wgpu::PowerPreference::default(),
 				force_fallback_adapter: false,
-				// Request an adapter which can render to our surface
 				compatible_surface: Some(&surface),
 			})
 			.await
-			.expect("Failed to find an appropriate adapter");
+			.expect("failed to find an appropriate adapter");
 
-		// Create the logical device and command queue
 		let (device, queue) = adapter
 			.request_device(
 				&wgpu::DeviceDescriptor {
 					label: None,
 					required_features: wgpu::Features::empty(),
-					// Make sure we use the texture resolution limits from the adapter, so we can support images the size of the swapchain.
-					required_limits: wgpu::Limits::downlevel_webgl2_defaults()
+					required_limits: wgpu::Limits::downlevel_defaults()
 						.using_resolution(adapter.limits()),
 				},
 				None,
@@ -128,116 +147,21 @@ impl State {
 		let depth_texture =
 			texture::Texture::create_depth_texture(&device, &config, "depth_texture");
 
-		// Load the shaders from disk
 		let shader = device.create_shader_module(wgpu::include_wgsl!("../shaders/shader.wgsl"));
 
-		let texture_bind_group_layout =
-			device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-				entries: &[
-					// Diffuse
-					wgpu::BindGroupLayoutEntry {
-						binding: 0,
-						visibility: wgpu::ShaderStages::FRAGMENT,
-						ty: wgpu::BindingType::Texture {
-							sample_type: wgpu::TextureSampleType::Float { filterable: true },
-							view_dimension: wgpu::TextureViewDimension::D2,
-							multisampled: false,
-						},
-						count: None,
-					},
-					wgpu::BindGroupLayoutEntry {
-						binding: 1,
-						visibility: wgpu::ShaderStages::FRAGMENT,
-						ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-						count: None,
-					},
-					// Normal
-					wgpu::BindGroupLayoutEntry {
-						binding: 2,
-						visibility: wgpu::ShaderStages::FRAGMENT,
-						ty: wgpu::BindingType::Texture {
-							sample_type: wgpu::TextureSampleType::Float { filterable: true },
-							view_dimension: wgpu::TextureViewDimension::D2,
-							multisampled: false,
-						},
-						count: None,
-					},
-					wgpu::BindGroupLayoutEntry {
-						binding: 3,
-						visibility: wgpu::ShaderStages::FRAGMENT,
-						ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-						count: None,
-					},
-					// Metallic + Roughness
-					wgpu::BindGroupLayoutEntry {
-						binding: 4,
-						visibility: wgpu::ShaderStages::FRAGMENT,
-						ty: wgpu::BindingType::Texture {
-							sample_type: wgpu::TextureSampleType::Float { filterable: true },
-							view_dimension: wgpu::TextureViewDimension::D2,
-							multisampled: false,
-						},
-						count: None,
-					},
-					wgpu::BindGroupLayoutEntry {
-						binding: 5,
-						visibility: wgpu::ShaderStages::FRAGMENT,
-						ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-						count: None,
-					},
-					// AO
-					wgpu::BindGroupLayoutEntry {
-						binding: 6,
-						visibility: wgpu::ShaderStages::FRAGMENT,
-						ty: wgpu::BindingType::Texture {
-							sample_type: wgpu::TextureSampleType::Float { filterable: true },
-							view_dimension: wgpu::TextureViewDimension::D2,
-							multisampled: false,
-						},
-						count: None,
-					},
-					wgpu::BindGroupLayoutEntry {
-						binding: 7,
-						visibility: wgpu::ShaderStages::FRAGMENT,
-						ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-						count: None,
-					},
-					// has_normal (f32)
-					wgpu::BindGroupLayoutEntry {
-						binding: 8,
-						visibility: wgpu::ShaderStages::FRAGMENT,
-						ty: wgpu::BindingType::Buffer {
-							ty: wgpu::BufferBindingType::Uniform,
-							has_dynamic_offset: false,
-							min_binding_size: None,
-						},
-						count: None,
-					},
-				],
-				label: Some("texture_bind_group_layout"),
-			});
+		let material_bind_group_layout = Material::create_bind_group_layout(&device);
 
 		let camera_builder = camera::CameraBuilder::new(config.width as f32, config.height as f32);
 		let camera = camera::Camera::new(&camera_builder).create_on_device(&device);
 		let controller = camera::CameraController::new(camera, camera_builder);
 
-		let gpu_model = model::Model::from_path(
-			"models/bottled_car/scene.gltf",
-			&device,
-			&queue,
-			&texture_bind_group_layout,
-			Vec3::Z,
-		)
-		.await
-		.unwrap()
-		.into_gpu(&device);
-
-		let light = light::Light::from_model(&gpu_model.model).create_on_device(&device);
+		let light =
+			light::Light::from_position(Vec3::new(0.0, 10_000.0, 0.0)).create_on_device(&device);
 
 		let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
 			label: None,
 			bind_group_layouts: &[
-				&texture_bind_group_layout,
+				&material_bind_group_layout,
 				&controller.camera.bind_group_layout,
 				&light.bind_group_layout,
 			],
@@ -287,10 +211,12 @@ impl State {
 			opaque_render_pipeline,
 			transparent_render_pipeline,
 
+			material_bind_group_layout,
+
 			controller,
 			depth_texture,
 
-			models: vec![gpu_model],
+			models: Vec::new(),
 			light,
 
 			last_frame: time::Instant::now(),
@@ -412,10 +338,11 @@ impl ApplicationHandler for App {
 			.unwrap();
 
 		window.set_cursor_grab(CursorGrabMode::Locked).unwrap();
-		// window.set_cursor_visible(false);
+		window.set_cursor_visible(false);
 
-		let state = pollster::block_on(State::new(window));
+		let mut state = pollster::block_on(State::new(window));
 
+		(self.on_ready)(&mut state);
 		self.state = Some(state);
 	}
 
@@ -462,7 +389,7 @@ impl ApplicationHandler for App {
 				app.update(delta);
 
 				match app.render() {
-					Ok(_) => {}
+					Ok(..) => {}
 					Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
 						app.resize(app.window.inner_size());
 					}
@@ -492,6 +419,7 @@ impl ApplicationHandler for App {
 					match key {
 						KeyCode::Escape => {
 							app.window.set_cursor_grab(CursorGrabMode::None).unwrap();
+							app.window.set_cursor_visible(true);
 						}
 						KeyCode::F11 if app.window.fullscreen().is_none() => {
 							app.window
@@ -517,13 +445,4 @@ impl ApplicationHandler for App {
 			_ => {}
 		}
 	}
-}
-
-fn main() -> Result<(), winit::error::EventLoopError> {
-	env_logger::init();
-
-	let event_loop = EventLoop::new().unwrap();
-	let mut app = App::default();
-
-	event_loop.run_app(&mut app)
 }

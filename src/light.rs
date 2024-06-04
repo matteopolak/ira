@@ -38,6 +38,15 @@ impl Light {
 		}
 	}
 
+	/// Creates a default light in a specific position.
+	#[must_use]
+	pub fn from_position(position: Vec3) -> Self {
+		Self {
+			position: position.into(),
+			..Default::default()
+		}
+	}
+
 	pub const LAYOUT_ENTRY: wgpu::BindGroupLayoutEntry = wgpu::BindGroupLayoutEntry {
 		binding: 0,
 		visibility: wgpu::ShaderStages::from_bits_truncate(

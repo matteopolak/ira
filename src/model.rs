@@ -51,6 +51,7 @@ pub struct Meshes {
 	pub transparent: Vec<Mesh>,
 }
 
+#[must_use]
 #[derive(Debug)]
 pub struct Model {
 	pub meshes: Meshes,
