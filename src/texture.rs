@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use anyhow::*;
+use anyhow::{anyhow, Ok, Result};
 
 #[derive(Debug)]
 pub struct Texture {
@@ -15,6 +15,30 @@ pub struct Texture {
 impl Texture {
 	pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 
+	pub fn resize(&mut self, device: &wgpu::Device, width: u32, height: u32) {
+		let size = wgpu::Extent3d {
+			width,
+			height,
+			depth_or_array_layers: 1,
+		};
+
+		self.texture = device.create_texture(&wgpu::TextureDescriptor {
+			label: None,
+			size,
+			mip_level_count: 1,
+			sample_count: 1,
+			dimension: wgpu::TextureDimension::D2,
+			format: self.texture.format(),
+			usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+			view_formats: &[],
+		});
+
+		self.view = self
+			.texture
+			.create_view(&wgpu::TextureViewDescriptor::default());
+	}
+
+	#[must_use]
 	pub fn create_depth_texture(
 		device: &wgpu::Device,
 		config: &wgpu::SurfaceConfiguration,
@@ -61,6 +85,7 @@ impl Texture {
 	}
 
 	/// Creates a new texture from a solid colour.
+	#[must_use]
 	pub fn new_solid(device: &wgpu::Device, queue: &wgpu::Queue, rgba: [u8; 4]) -> Self {
 		let image = image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(
 			32,
@@ -71,6 +96,7 @@ impl Texture {
 		Self::from_image(device, queue, image.into(), Some("solid colour"))
 	}
 
+	#[must_use]
 	pub fn new_solid_f32(device: &wgpu::Device, queue: &wgpu::Queue, rgba: [f32; 4]) -> Self {
 		let rgba8 = [
 			(rgba[0] * 255.0) as u8,
@@ -82,6 +108,10 @@ impl Texture {
 		Self::new_solid(device, queue, rgba8)
 	}
 
+	/// Creates a new texture from an image file.
+	///
+	/// # Errors
+	/// Returns an error if the image file cannot be read or is in an unsupported format.
 	pub fn try_from_path<P: AsRef<Path>>(
 		device: &wgpu::Device,
 		queue: &wgpu::Queue,
@@ -93,6 +123,12 @@ impl Texture {
 		Ok(Self::from_image(device, queue, image.into(), Some(label)))
 	}
 
+	/// Creates a new texture from a byte slice.
+	///
+	/// The byte slice should contain RGBA8 image data, but other formats will be attempted.
+	///
+	/// # Errors
+	/// Returns an error if the byte slice cannot be converted into an image.
 	pub fn try_from_bytes<B>(
 		device: &wgpu::Device,
 		queue: &wgpu::Queue,
@@ -107,6 +143,7 @@ impl Texture {
 		Ok(Self::from_image(device, queue, image.into(), label))
 	}
 
+	#[must_use]
 	pub fn from_image(
 		device: &wgpu::Device,
 		queue: &wgpu::Queue,
@@ -177,11 +214,12 @@ impl Image {
 	pub fn blend(&mut self, base: [f32; 4]) {
 		for pixel in self.data.chunks_exact_mut(4) {
 			for (p, b) in pixel.iter_mut().zip(base.iter()) {
-				*p = (*p as f32 * b) as u8;
+				*p = (f32::from(*p) * b) as u8;
 			}
 		}
 	}
 
+	#[must_use]
 	pub fn is_transparent(&self) -> bool {
 		self.data.chunks_exact(4).any(|pixel| pixel[3] < 255)
 	}
@@ -243,6 +281,7 @@ pub struct Material {
 }
 
 impl Material {
+	#[must_use]
 	pub fn default(device: &wgpu::Device, queue: &wgpu::Queue) -> Self {
 		let diffuse = Texture::new_solid(device, queue, [u8::MAX; 4]);
 		let normal = Texture::new_solid(device, queue, [128, 128, 255, 255]);
@@ -258,6 +297,7 @@ impl Material {
 		}
 	}
 
+	#[must_use]
 	pub fn create_bind_group(
 		&self,
 		device: &wgpu::Device,
@@ -304,6 +344,7 @@ impl Material {
 	}
 
 	/// Creates a new material with a solid colour.
+	#[must_use]
 	pub fn from_rgba8(device: &wgpu::Device, queue: &wgpu::Queue, rgba: [u8; 4]) -> Self {
 		let image =
 			image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(1, 1, image::Rgba(rgba)));
@@ -317,6 +358,7 @@ impl Material {
 	}
 
 	/// Creates a new material with a solid colour, using floating point values.
+	#[must_use]
 	pub fn from_rgba(device: &wgpu::Device, queue: &wgpu::Queue, rgba: [f32; 4]) -> Self {
 		let rgba8 = [
 			(rgba[0] * 255.0) as u8,
@@ -340,16 +382,11 @@ impl Material {
 		material: &gltf::Material<'_>,
 		root: &Path,
 	) -> Result<Self> {
-		let mut source = None;
 		let diffuse_texture = material
 			.pbr_metallic_roughness()
 			.base_color_texture()
 			.map(|t| t.texture().source())
-			.map(|s| {
-				println!("source: {:?}", s.source());
-				source = Some(s.source());
-				gltf::image::Data::from_source(s.source(), Some(root), &[])
-			})
+			.map(|s| gltf::image::Data::from_source(s.source(), Some(root), &[]))
 			.transpose()?;
 
 		let diffuse_colour = material.pbr_metallic_roughness().base_color_factor();
@@ -360,7 +397,7 @@ impl Material {
 					// multiply alpha by colour
 					i.blend(diffuse_colour);
 
-					Texture::from_image(device, queue, i.into(), Some("diffuse texture"))
+					Texture::from_image(device, queue, i, Some("diffuse texture"))
 				})
 			},
 		)?;
@@ -368,10 +405,7 @@ impl Material {
 		let normal_texture = material
 			.normal_texture()
 			.map(|t| t.texture().source())
-			.map(|s| {
-				println!("source: {:?}", s.source());
-				gltf::image::Data::from_source(s.source(), Some(root), &[])
-			})
+			.map(|s| gltf::image::Data::from_source(s.source(), Some(root), &[]))
 			.transpose()?;
 		let normal_texture = normal_texture.map_or_else(
 			|| Ok(Texture::new_solid(device, queue, [128, 128, 255, 255])),
@@ -385,10 +419,7 @@ impl Material {
 			.pbr_metallic_roughness()
 			.metallic_roughness_texture()
 			.map(|t| t.texture().source())
-			.map(|s| {
-				println!("source: {:?}", s.source());
-				gltf::image::Data::from_source(s.source(), Some(root), &[])
-			})
+			.map(|s| gltf::image::Data::from_source(s.source(), Some(root), &[]))
 			.transpose()?;
 		let metallic_roughness_texture = metallic_roughness_texture.map_or_else(
 			|| Ok(Texture::new_solid(device, queue, [0, 0, 0, 255])),
@@ -401,10 +432,7 @@ impl Material {
 		let ao_texture = material
 			.occlusion_texture()
 			.map(|t| t.texture().source())
-			.map(|s| {
-				println!("source: {:?}", s.source());
-				gltf::image::Data::from_source(s.source(), Some(root), &[])
-			})
+			.map(|s| gltf::image::Data::from_source(s.source(), Some(root), &[]))
 			.transpose()?;
 		let ao_texture = ao_texture.map_or_else(
 			|| Ok(Texture::new_solid(device, queue, [255; 4])),

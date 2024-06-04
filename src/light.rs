@@ -27,7 +27,7 @@ impl Default for Light {
 impl Light {
 	/// Creates a default Light, but the position is set to the
 	/// centroid of the model, with a large y value.
-	pub fn from_model(model: &Model) -> Self {
+	#[must_use] pub fn from_model(model: &Model) -> Self {
 		let centroid = model.centroid;
 		let position = centroid + Vec3::Z * 10_000.0;
 
@@ -73,7 +73,7 @@ impl Light {
 		(bind_group, layout)
 	}
 
-	pub fn create_uniform_buffer(&self, device: &wgpu::Device) -> wgpu::Buffer {
+	#[must_use] pub fn create_uniform_buffer(&self, device: &wgpu::Device) -> wgpu::Buffer {
 		device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
 			label: Some("light_uniform_buffer"),
 			contents: bytemuck::cast_slice(&[*self]),
@@ -81,7 +81,7 @@ impl Light {
 		})
 	}
 
-	pub fn create_on_device(self, device: &wgpu::Device) -> GpuLight {
+	#[must_use] pub fn create_on_device(self, device: &wgpu::Device) -> GpuLight {
 		let buffer = self.create_uniform_buffer(device);
 		let (bind_group, bind_group_layout) = Self::create_bind_group(device, &buffer);
 

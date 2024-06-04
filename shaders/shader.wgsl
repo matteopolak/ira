@@ -72,32 +72,31 @@ fn vs_main(model: VertexInput) -> VertexOutput {
 const pi = radians(180.0);
 const ambient_intensity = 1.0;
 
-fn geometry_schlick_ggx(n_dot_v: f32, roughness: f32) -> f32 {
-	let r = (roughness + 1.0);
-	let k = (r * r) / 8.0;
+fn geometry_schlick_ggx(n_dot_v: f32, k: f32) -> f32 {
 	let numerator = n_dot_v;
 	let denominator = n_dot_v * (1.0 - k) + k;
 
 	return numerator / denominator;
 }
 
-fn geometry_smith(normal: vec3<f32>, view_dir: vec3<f32>, light_dir: vec3<f32>, roughness: f32) -> f32 {
-	let n_dot_v = max(dot(normal, view_dir), 0.0);
-	let n_dot_l = max(dot(normal, light_dir), 0.0);
-	let ggx1 = geometry_schlick_ggx(n_dot_v, roughness);
-	let ggx2 = geometry_schlick_ggx(n_dot_l, roughness);
+fn geometry_smith(n: vec3<f32>, v: vec3<f32>, l: vec3<f32>, k: f32) -> f32 {
+	let n_dot_v = max(dot(n, v), 0.0);
+	let n_dot_l = max(dot(n, l), 0.0);
+	let ggx1 = geometry_schlick_ggx(n_dot_v, k);
+	let ggx2 = geometry_schlick_ggx(n_dot_l, k);
 
 	return ggx1 * ggx2;
 }
 
-fn fresnel_schlick(cos_theta: f32, f0: vec3<f32>) -> vec3<f32> {
-	return f0 + (vec3<f32>(1.0) - f0) * pow(1.0 - cos_theta, 5.0);
+fn fresnel_schlick(v_dot_h: f32, f0: vec3<f32>) -> vec3<f32> {
+	return f0 + (vec3<f32>(1.0) - f0) * pow(1.0 - v_dot_h, 5.0);
 }
 
-fn distribution_ggx(normal: vec3<f32>, half_vec: vec3<f32>, a: f32) -> f32 {
+fn distribution_ggx(n: vec3<f32>, h: vec3<f32>, a: f32) -> f32 {
 	let a2 = a * a;
-	let n_dot_h = dot(normal, half_vec);
+	let n_dot_h = max(dot(n, h), 0.0);
 	let n_dot_h2 = n_dot_h * n_dot_h;
+
 	let numerator = a2;
 	let denominator = (n_dot_h2 * (a2 - 1.0) + 1.0);
 
@@ -153,7 +152,6 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
 	// Combine components
 	let final_color = (diffuse + specular) * radiance * n_dot_l + ambient;
-	let enhanced_color = mix(diffuse * (1.0 - metallic), specular, metallic);
 
-	return vec4<f32>(enhanced_color, albedo.a);
+	return vec4<f32>(final_color, albedo.a);
 }

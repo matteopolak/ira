@@ -26,6 +26,7 @@ impl Vertex {
 	pub const VERTICES: [wgpu::VertexAttribute; 3] =
 		wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Float32x2];
 
+	#[must_use]
 	pub fn desc() -> wgpu::VertexBufferLayout<'static> {
 		wgpu::VertexBufferLayout {
 			array_stride: mem::size_of::<Vertex>() as wgpu::BufferAddress,
@@ -34,6 +35,7 @@ impl Vertex {
 		}
 	}
 
+	#[must_use]
 	pub fn new(position: [f32; 3], normal: [f32; 3], tex_coords: [f32; 2]) -> Self {
 		Self {
 			position,
@@ -72,6 +74,10 @@ pub struct GpuMaterial {
 }
 
 impl Model {
+	/// Load a model from a glTF or OBJ file.
+	///
+	/// # Errors
+	/// See [`Model::from_path_gltf`] and [`Model::from_path_obj`] for possible errors.
 	pub async fn from_path<P>(
 		path: P,
 		device: &wgpu::Device,
@@ -79,7 +85,7 @@ impl Model {
 		layout: &wgpu::BindGroupLayout,
 	) -> anyhow::Result<Self>
 	where
-		P: AsRef<Path> + fmt::Display + fmt::Debug,
+		P: AsRef<Path> + fmt::Debug,
 	{
 		match path.as_ref().extension().and_then(|s| s.to_str()) {
 			Some("obj") => Self::from_path_obj(path, device, queue, layout).await,
@@ -88,14 +94,19 @@ impl Model {
 		}
 	}
 
-	async fn from_path_gltf<P>(
+	/// Loads a model from a glTF file.
+	///
+	/// # Errors
+	/// Returns an error if the file cannot be read or the glTF data is invalid.
+	/// Returns an error if the glTF file references external data and the root path cannot be determined.
+	pub async fn from_path_gltf<P>(
 		path: P,
 		device: &wgpu::Device,
 		queue: &wgpu::Queue,
 		layout: &wgpu::BindGroupLayout,
 	) -> anyhow::Result<Self>
 	where
-		P: AsRef<Path> + fmt::Display + fmt::Debug,
+		P: AsRef<Path> + fmt::Debug,
 	{
 		let root = path
 			.as_ref()
@@ -122,8 +133,7 @@ impl Model {
 
 				Ok(data.0)
 			})
-			.collect::<Result<Vec<_>, anyhow::Error>>()
-			.unwrap();
+			.collect::<Result<Vec<_>, anyhow::Error>>()?;
 
 		let mut centroid = Vec3::ZERO;
 		let mut num_vertices = 0;
@@ -138,8 +148,12 @@ impl Model {
 
 				let material_index = primitive.material().index();
 
-				let positions = reader.read_positions().unwrap();
-				let normals = reader.read_normals().unwrap();
+				let positions = reader
+					.read_positions()
+					.ok_or_else(|| anyhow::anyhow!("mesh primitive does not have positions"))?;
+				let normals = reader
+					.read_normals()
+					.ok_or_else(|| anyhow::anyhow!("mesh primitive does not have normals"))?;
 				let tex_coords = reader.read_tex_coords(0);
 
 				if let Some(tex_coords) = tex_coords {
@@ -162,17 +176,17 @@ impl Model {
 
 				let indices = reader
 					.read_indices()
-					.unwrap()
+					.ok_or_else(|| anyhow::anyhow!("mesh primitive does not have indices"))?
 					.into_u32()
 					.collect::<Vec<_>>();
 
 				let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-					label: Some(&format!("{:?} Vertex Buffer", path)),
+					label: Some(&format!("{path:?} Vertex Buffer")),
 					contents: bytemuck::cast_slice(&vertices),
 					usage: wgpu::BufferUsages::VERTEX,
 				});
 				let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-					label: Some(&format!("{:?} Index Buffer", path)),
+					label: Some(&format!("{path:?} Index Buffer")),
 					contents: bytemuck::cast_slice(&indices),
 					usage: wgpu::BufferUsages::INDEX,
 				});
@@ -202,16 +216,24 @@ impl Model {
 		})
 	}
 
-	async fn from_path_obj<P>(
+	/// Loads a model from an OBJ file.
+	///
+	/// # Errors
+	/// Returns an error if the file cannot be read or the OBJ data is invalid.
+	/// Returns an error if the OBJ file references external data and the root path cannot be determined.
+	pub async fn from_path_obj<P>(
 		path: P,
 		device: &wgpu::Device,
 		queue: &wgpu::Queue,
 		layout: &wgpu::BindGroupLayout,
 	) -> anyhow::Result<Self>
 	where
-		P: AsRef<Path> + fmt::Display + fmt::Debug,
+		P: AsRef<Path> + fmt::Debug,
 	{
-		let root = path.as_ref().parent().unwrap();
+		let root = path
+			.as_ref()
+			.parent()
+			.ok_or_else(|| anyhow::anyhow!("expected path to file"))?;
 		let mut file = BufReader::new(File::open(&path)?);
 		let (models, obj_materials) = tobj::load_obj_buf_async(
 			&mut file,
@@ -222,7 +244,8 @@ impl Model {
 			},
 			|p| async move {
 				let path = root.join(PathBuf::from(p));
-				let mut reader = BufReader::new(File::open(&path).unwrap());
+				let mut reader =
+					BufReader::new(File::open(&path).map_err(|_| tobj::LoadError::OpenFileFailed)?);
 
 				tobj::load_mtl_buf(&mut reader)
 			},
@@ -281,18 +304,18 @@ impl Model {
 			num_vertices += vertices.len();
 
 			let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-				label: Some(&format!("{:?} Vertex Buffer", path)),
+				label: Some(&format!("{path:?} Vertex Buffer")),
 				contents: bytemuck::cast_slice(&vertices),
 				usage: wgpu::BufferUsages::VERTEX,
 			});
 			let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-				label: Some(&format!("{:?} Index Buffer", path)),
+				label: Some(&format!("{path:?} Index Buffer")),
 				contents: bytemuck::cast_slice(&mesh.indices),
 				usage: wgpu::BufferUsages::INDEX,
 			});
 
 			let mesh = Mesh {
-				name: path.to_string(),
+				name: model.name,
 				vertex_buffer,
 				index_buffer,
 				num_elements: mesh.indices.len() as u32,
