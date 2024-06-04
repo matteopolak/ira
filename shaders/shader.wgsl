@@ -13,17 +13,15 @@ struct VertexInput {
 	@location(0) position: vec3<f32>,
 	@location(1) normal: vec3<f32>,
 	@location(2) tex_coords: vec2<f32>,
-	@location(3) diffuse_tex_coords: vec2<f32>,
 };
 
 struct VertexOutput {
 	@builtin(position) clip_position: vec4<f32>,
 	@location(0) tex_coords: vec2<f32>,
-	@location(1) diffuse_tex_coords: vec2<f32>,
-	@location(2) world_position: vec3<f32>,
-	@location(3) world_normal: vec3<f32>,
-	@location(4) world_tangent: vec3<f32>,
-	@location(5) world_bitangent: vec3<f32>,
+	@location(1) world_position: vec3<f32>,
+	@location(2) world_normal: vec3<f32>,
+	@location(3) world_tangent: vec3<f32>,
+	@location(4) world_bitangent: vec3<f32>,
 };
 
 @group(1) @binding(0)
@@ -32,17 +30,28 @@ var<uniform> camera: CameraUniform;
 @group(2) @binding(0)
 var<uniform> light: Light;
 
+fn calculate_tangent(normal: vec3<f32>) -> vec3<f32> {
+	var helper: vec3<f32>;
+
+	if (abs(normal.y) > 0.99) {
+		helper = vec3<f32>(1.0, 0.0, 0.0);
+	} else {
+		helper = vec3<f32>(0.0, 1.0, 0.0);
+	}
+
+	return normalize(cross(normal, helper));
+}
+
 @vertex
 fn vs_main(model: VertexInput) -> VertexOutput {
 	var out: VertexOutput;
 
 	out.clip_position = camera.view_proj * vec4<f32>(model.position, 1.0);
 	out.tex_coords = model.tex_coords;
-	out.diffuse_tex_coords = model.diffuse_tex_coords;
 	out.world_position = model.position;
-	out.world_normal = model.normal;
+	out.world_normal = normalize(model.normal);
 	// TODO: calculate tangent and bitangent when processing the model
-	out.world_tangent = vec3<f32>(1.0, 0.0, 0.0);
+	out.world_tangent = calculate_tangent(model.normal);
 	out.world_bitangent = cross(out.world_normal, out.world_tangent);
 
 	return out;
@@ -60,36 +69,91 @@ fn vs_main(model: VertexInput) -> VertexOutput {
 @group(0) @binding(6) var t_ao: texture_2d<f32>;
 @group(0) @binding(7) var s_ao: sampler;
 
+const pi = radians(180.0);
+const ambient_intensity = 1.0;
+
+fn geometry_schlick_ggx(n_dot_v: f32, roughness: f32) -> f32 {
+	let r = (roughness + 1.0);
+	let k = (r * r) / 8.0;
+	let numerator = n_dot_v;
+	let denominator = n_dot_v * (1.0 - k) + k;
+
+	return numerator / denominator;
+}
+
+fn geometry_smith(normal: vec3<f32>, view_dir: vec3<f32>, light_dir: vec3<f32>, roughness: f32) -> f32 {
+	let n_dot_v = max(dot(normal, view_dir), 0.0);
+	let n_dot_l = max(dot(normal, light_dir), 0.0);
+	let ggx1 = geometry_schlick_ggx(n_dot_v, roughness);
+	let ggx2 = geometry_schlick_ggx(n_dot_l, roughness);
+
+	return ggx1 * ggx2;
+}
+
+fn fresnel_schlick(cos_theta: f32, f0: vec3<f32>) -> vec3<f32> {
+	return f0 + (vec3<f32>(1.0) - f0) * pow(1.0 - cos_theta, 5.0);
+}
+
+fn distribution_ggx(normal: vec3<f32>, half_vec: vec3<f32>, a: f32) -> f32 {
+	let a2 = a * a;
+	let n_dot_h = dot(normal, half_vec);
+	let n_dot_h2 = n_dot_h * n_dot_h;
+	let numerator = a2;
+	let denominator = (n_dot_h2 * (a2 - 1.0) + 1.0);
+
+	return numerator / (pi * denominator * denominator);
+}
+
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-	let base_color = textureSample(t_diffuse, s_diffuse, in.diffuse_tex_coords);
-	let normal_map = textureSample(t_normal, s_normal, in.tex_coords).rgb;
+	let albedo = textureSample(t_diffuse, s_diffuse, in.tex_coords);
+	let bump = textureSample(t_normal, s_normal, in.tex_coords).rgb;
 	let metallic_roughness = textureSample(t_metallic_roughness, s_metallic_roughness, in.tex_coords);
 	let ao = textureSample(t_ao, s_ao, in.tex_coords).r;
 
-	let roughness = metallic_roughness.r;
+	let roughness = metallic_roughness.g;
 	let metallic = metallic_roughness.b;
 
-	let N_tangent = normalize(normal_map * 2.0 - 1.0);
-	let TBN = mat3x3<f32>(in.world_tangent, in.world_bitangent, in.world_normal);
-	let N = normalize(TBN * N_tangent);
+	// [0, 1] to [-1, 1]
+	let tangent_normal = normalize(bump * 2.0 - 1.0);
+	let tbn = mat3x3<f32>(
+		normalize(in.world_tangent),
+		normalize(in.world_bitangent),
+		normalize(in.world_normal)
+	);
+	let normal = normalize(tbn * tangent_normal);
+	let ambient = ambient_intensity * albedo.rgb * ao;
 
-	let V = normalize(camera.view_pos - in.world_position);
-	let ambient_intensity = 0.3;
+	// Reflectance at normal incidence (F0)
+	let f0 = mix(vec3<f32>(0.04), albedo.rgb, metallic);
 
-	var final_color = base_color.rgb * (ambient_intensity * ao);
+	// Light properties
+	let light_dir = normalize(light.position - in.world_position);
+	let view_dir = normalize(camera.view_pos - in.world_position);
+	let half_vec = normalize(view_dir + light_dir);
 
-	let L = normalize(light.position - in.world_position);
-	let H = normalize(L + V);
+	// Cook-Torrance BRDF
+	let n_dot_l = max(dot(normal, light_dir), 0.0);
+	let n_dot_v = max(dot(normal, view_dir), 0.0);
+	let v_dot_h = dot(view_dir, half_vec);
 
-	let diff = max(dot(N, L), 0.0);
-	let diffuse = diff * light.color * base_color.rgb;
+	let d = distribution_ggx(normal, half_vec, roughness);
+	let g = geometry_smith(normal, view_dir, light_dir, roughness);
+	let f = fresnel_schlick(v_dot_h, f0);
 
-	let spec = pow(max(dot(N, H), 0.0), 32.0);
-	let specular = spec * light.color * metallic;
+	let k_s = f;
+	let k_d = (vec3<f32>(1.0) - k_s) * (1.0 - metallic);
 
-	final_color += (diffuse + specular) * light.intensity;
-	final_color = clamp(final_color, vec3<f32>(0.0), vec3<f32>(1.0));
+	let numerator = d * g * f;
+	let denominator = 4.0 * n_dot_v * n_dot_l + 0.001; // Prevent divide by zero
+	let specular = numerator / denominator;
 
-	return vec4<f32>(final_color, base_color.a);
+	let radiance = light.color * light.intensity;
+	let diffuse = k_d * albedo.rgb / pi;
+
+	// Combine components
+	let final_color = (diffuse + specular) * radiance * n_dot_l + ambient;
+	let enhanced_color = mix(diffuse * (1.0 - metallic), specular, metallic);
+
+	return vec4<f32>(enhanced_color, albedo.a);
 }

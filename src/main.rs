@@ -350,13 +350,8 @@ impl State {
 			write_mask: wgpu::ColorWrites::COLOR,
 		};
 
-		let transparent_render_pipeline = create_render_pipeline(
-			&device,
-			&pipeline_layout,
-			transparent_target,
-			false,
-			&shader,
-		);
+		let transparent_render_pipeline =
+			create_render_pipeline(&device, &pipeline_layout, transparent_target, true, &shader);
 
 		let opaque_render_pipeline = create_render_pipeline(
 			&device,

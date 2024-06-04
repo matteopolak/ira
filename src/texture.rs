@@ -1,7 +1,4 @@
-use std::{
-	borrow::Cow,
-	path::{Path, PathBuf},
-};
+use std::path::Path;
 
 use anyhow::*;
 
@@ -65,7 +62,6 @@ impl Texture {
 
 	/// Creates a new texture from a solid colour.
 	pub fn new_solid(device: &wgpu::Device, queue: &wgpu::Queue, rgba: [u8; 4]) -> Self {
-		println!("using default");
 		let image = image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(
 			32,
 			32,
@@ -209,8 +205,6 @@ impl TryFrom<gltf::image::Data> for Image {
 	fn try_from(data: gltf::image::Data) -> Result<Self, Self::Error> {
 		let dimensions = (data.width, data.height);
 
-		println!("format: {:?}", (data.width, data.height));
-
 		let image = match data.format {
 			gltf::image::Format::R8 => image::DynamicImage::ImageLuma8(
 				image::ImageBuffer::from_vec(data.width, data.height, data.pixels)
@@ -334,25 +328,23 @@ impl Material {
 		Self::from_rgba8(device, queue, rgba8)
 	}
 
+	/// Creates a new material from a glTF material.
+	///
+	/// The material's textures are loaded from the same directory as the glTF file.
+	///
+	/// # Errors
+	/// Returns an error if the material's textures cannot be loaded.
 	pub fn from_gltf_material(
 		device: &wgpu::Device,
 		queue: &wgpu::Queue,
 		material: &gltf::Material<'_>,
 		root: &Path,
 	) -> Result<Self> {
-		println!("diffuse");
 		let mut source = None;
-		let mut diffuse_tex_coord = 0;
 		let diffuse_texture = material
 			.pbr_metallic_roughness()
 			.base_color_texture()
-			.map(|t| {
-				diffuse_tex_coord = t.tex_coord();
-
-				println!("tex coord: {:?}", t.tex_coord());
-
-				t.texture().source()
-			})
+			.map(|t| t.texture().source())
 			.map(|s| {
 				println!("source: {:?}", s.source());
 				source = Some(s.source());
@@ -361,44 +353,27 @@ impl Material {
 			.transpose()?;
 
 		let diffuse_colour = material.pbr_metallic_roughness().base_color_factor();
-		println!("colour: {:?}", diffuse_colour);
-		let mut diffuse_texture = if source.map(|s| match s {
-			gltf::image::Source::Uri { uri, .. } => uri,
-			_ => "",
-		}) == Some("textures/GLASS_N_CHROME_baseColor.png____")
-		{
-			Texture::new_solid(device, queue, [255, 0, 0, 255])
-		} else {
-			diffuse_texture.map_or_else(
-				|| Ok(Texture::new_solid_f32(device, queue, diffuse_colour)),
-				|t| {
-					Image::try_from(t).map(|mut i| {
-						// multiply alpha by colour
-						i.blend(diffuse_colour);
+		let diffuse_texture = diffuse_texture.map_or_else(
+			|| Ok(Texture::new_solid_f32(device, queue, diffuse_colour)),
+			|t| {
+				Image::try_from(t).map(|mut i| {
+					// multiply alpha by colour
+					i.blend(diffuse_colour);
 
-						Texture::from_image(device, queue, i.into(), Some("diffuse texture"))
-					})
-				},
-			)?
-		};
+					Texture::from_image(device, queue, i.into(), Some("diffuse texture"))
+				})
+			},
+		)?;
 
-		diffuse_texture.tex_coord = Some(diffuse_tex_coord);
-
-		println!("normal");
-
-		let mut normal_tex_coord = 0;
 		let normal_texture = material
 			.normal_texture()
-			.map(|t| {
-				normal_tex_coord = t.tex_coord();
-				t.texture().source()
-			})
+			.map(|t| t.texture().source())
 			.map(|s| {
 				println!("source: {:?}", s.source());
 				gltf::image::Data::from_source(s.source(), Some(root), &[])
 			})
 			.transpose()?;
-		let mut normal_texture = normal_texture.map_or_else(
+		let normal_texture = normal_texture.map_or_else(
 			|| Ok(Texture::new_solid(device, queue, [128, 128, 255, 255])),
 			|t| {
 				Image::try_from(t)
@@ -406,24 +381,16 @@ impl Material {
 			},
 		)?;
 
-		normal_texture.tex_coord = Some(normal_tex_coord);
-
-		println!("metallic roughness");
-
-		let mut metallic_roughness_tex_coord = 0;
 		let metallic_roughness_texture = material
 			.pbr_metallic_roughness()
 			.metallic_roughness_texture()
-			.map(|t| {
-				metallic_roughness_tex_coord = t.tex_coord();
-				t.texture().source()
-			})
+			.map(|t| t.texture().source())
 			.map(|s| {
 				println!("source: {:?}", s.source());
 				gltf::image::Data::from_source(s.source(), Some(root), &[])
 			})
 			.transpose()?;
-		let mut metallic_roughness_texture = metallic_roughness_texture.map_or_else(
+		let metallic_roughness_texture = metallic_roughness_texture.map_or_else(
 			|| Ok(Texture::new_solid(device, queue, [0, 0, 0, 255])),
 			|t| {
 				Image::try_from(t)
@@ -431,34 +398,21 @@ impl Material {
 			},
 		)?;
 
-		metallic_roughness_texture.tex_coord = Some(metallic_roughness_tex_coord);
-
-		println!("ambient occlusion");
-
-		let mut ao_tex_coord = 0;
 		let ao_texture = material
 			.occlusion_texture()
-			.map(|t| {
-				ao_tex_coord = t.tex_coord();
-
-				t.texture().source()
-			})
+			.map(|t| t.texture().source())
 			.map(|s| {
 				println!("source: {:?}", s.source());
 				gltf::image::Data::from_source(s.source(), Some(root), &[])
 			})
 			.transpose()?;
-		let mut ao_texture = ao_texture.map_or_else(
+		let ao_texture = ao_texture.map_or_else(
 			|| Ok(Texture::new_solid(device, queue, [255; 4])),
 			|t| {
 				Image::try_from(t)
 					.map(|i| Texture::from_image(device, queue, i, Some("ambient occlusion map")))
 			},
 		)?;
-
-		ao_texture.tex_coord = Some(ao_tex_coord);
-
-		println!("done");
 
 		Ok(Self {
 			diffuse: diffuse_texture,
@@ -469,11 +423,17 @@ impl Material {
 		})
 	}
 
+	/// Creates a new material from an OBJ material.
+	///
+	/// The material's textures are loaded from the same directory as the OBJ file.
+	///
+	/// # Errors
+	/// Returns an error if the material's textures cannot be loaded.
 	pub fn from_obj_material(
-		device: &wgpu::Device,
-		queue: &wgpu::Queue,
-		material: &tobj::Material,
-		root: &Path,
+		_device: &wgpu::Device,
+		_queue: &wgpu::Queue,
+		_material: &tobj::Material,
+		_root: &Path,
 	) -> Result<Self> {
 		todo!()
 	}
