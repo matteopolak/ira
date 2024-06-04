@@ -149,5 +149,6 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 	// Combine components
 	let final_color = (diffuse + specular) * radiance * n_dot_l + ambient;
 
-	return vec4<f32>(normal, 1.0);
+	// return vec4<f32>(normal, 1.0);
+	return vec4<f32>(final_color, albedo.a);
 }

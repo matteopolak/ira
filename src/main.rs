@@ -2,9 +2,8 @@ pub use ira::*;
 
 use std::{sync::Arc, time};
 
-use glam::{Mat4, Quat, Vec3};
-use model::DrawModel;
-use wgpu::util::DeviceExt;
+use glam::Vec3;
+use model::{DrawModel, Instance};
 use winit::{
 	application::ApplicationHandler,
 	event::{DeviceEvent, KeyEvent, MouseButton, WindowEvent},
@@ -16,44 +15,6 @@ use winit::{
 #[derive(Default)]
 struct App {
 	state: Option<State>,
-}
-
-struct Instance {
-	position: Vec3,
-	rotation: Quat,
-}
-
-impl Instance {
-	fn to_raw(&self) -> InstanceRaw {
-		InstanceRaw {
-			model: (Mat4::from_translation(self.position) * Mat4::from_quat(self.rotation))
-				.to_cols_array_2d(),
-		}
-	}
-}
-
-#[repr(C)]
-#[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
-struct InstanceRaw {
-	model: [[f32; 4]; 4],
-}
-
-impl InstanceRaw {
-	const VERTICES: [wgpu::VertexAttribute; 4] = wgpu::vertex_attr_array![
-		5 => Float32x4,
-		6 => Float32x4,
-		7 => Float32x4,
-		8 => Float32x4,
-	];
-
-	fn desc() -> wgpu::VertexBufferLayout<'static> {
-		use std::mem;
-		wgpu::VertexBufferLayout {
-			array_stride: mem::size_of::<InstanceRaw>() as wgpu::BufferAddress,
-			step_mode: wgpu::VertexStepMode::Instance,
-			attributes: &Self::VERTICES,
-		}
-	}
 }
 
 fn create_render_pipeline(
@@ -69,7 +30,7 @@ fn create_render_pipeline(
 		vertex: wgpu::VertexState {
 			module: shader,
 			entry_point: "vs_main",
-			buffers: &[model::Vertex::desc(), InstanceRaw::desc()],
+			buffers: &[model::Vertex::desc(), Instance::desc()],
 			compilation_options: Default::default(),
 		},
 		fragment: Some(wgpu::FragmentState {
@@ -116,17 +77,12 @@ struct State {
 	controller: camera::CameraController,
 
 	depth_texture: texture::Texture,
-
-	instances: Vec<Instance>,
-	instance_buffer: wgpu::Buffer,
-	models: Vec<model::Model>,
+	models: Vec<model::GpuModel>,
 
 	light: light::GpuLight,
 
 	last_frame: time::Instant,
 }
-
-const NUM_INSTANCES_PER_ROW: u32 = 10;
 
 impl State {
 	async fn new(window: Window) -> Self {
@@ -174,33 +130,6 @@ impl State {
 
 		// Load the shaders from disk
 		let shader = device.create_shader_module(wgpu::include_wgsl!("../shaders/shader.wgsl"));
-
-		const SPACE_BETWEEN: f32 = 3.0;
-		let instances = (0..NUM_INSTANCES_PER_ROW)
-			.flat_map(|z| {
-				(0..NUM_INSTANCES_PER_ROW).map(move |x| {
-					let x = SPACE_BETWEEN * (x as f32 - NUM_INSTANCES_PER_ROW as f32 / 2.0);
-					let z = SPACE_BETWEEN * (z as f32 - NUM_INSTANCES_PER_ROW as f32 / 2.0);
-
-					let position = Vec3 { x, y: 0.0, z };
-
-					let rotation = if position == Vec3::ZERO {
-						Quat::from_axis_angle(Vec3::Z, 0.0)
-					} else {
-						Quat::from_axis_angle(position.normalize(), 45f32.to_radians())
-					};
-
-					Instance { position, rotation }
-				})
-			})
-			.collect::<Vec<_>>();
-
-		let instance_data = instances.iter().map(Instance::to_raw).collect::<Vec<_>>();
-		let instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-			label: Some("Instance Buffer"),
-			contents: bytemuck::cast_slice(&instance_data),
-			usage: wgpu::BufferUsages::VERTEX,
-		});
 
 		let texture_bind_group_layout =
 			device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -292,7 +221,7 @@ impl State {
 		let camera = camera::Camera::new(&camera_builder).create_on_device(&device);
 		let controller = camera::CameraController::new(camera, camera_builder);
 
-		let model = model::Model::from_path(
+		let gpu_model = model::Model::from_path(
 			"models/bottled_car/scene.gltf",
 			&device,
 			&queue,
@@ -300,9 +229,10 @@ impl State {
 			Vec3::Z,
 		)
 		.await
-		.unwrap();
+		.unwrap()
+		.into_gpu(&device);
 
-		let light = light::Light::from_model(&model).create_on_device(&device);
+		let light = light::Light::from_model(&gpu_model.model).create_on_device(&device);
 
 		let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
 			label: None,
@@ -360,9 +290,7 @@ impl State {
 			controller,
 			depth_texture,
 
-			instances,
-			instance_buffer,
-			models: vec![model],
+			models: vec![gpu_model],
 			light,
 
 			last_frame: time::Instant::now(),
@@ -422,13 +350,11 @@ impl State {
 			occlusion_query_set: None,
 		});
 
-		rpass.set_vertex_buffer(1, self.instance_buffer.slice(..));
 		rpass.set_pipeline(&self.opaque_render_pipeline);
 
 		for model in &self.models {
 			rpass.draw_model_instanced(
 				model,
-				0..self.instances.len() as u32,
 				&self.controller.camera.bind_group,
 				&self.light.bind_group,
 				false,
@@ -459,13 +385,11 @@ impl State {
 			occlusion_query_set: None,
 		});
 
-		rpass.set_vertex_buffer(1, self.instance_buffer.slice(..));
 		rpass.set_pipeline(&self.transparent_render_pipeline);
 
 		for model in &self.models {
 			rpass.draw_model_instanced(
 				model,
-				0..self.instances.len() as u32,
 				&self.controller.camera.bind_group,
 				&self.light.bind_group,
 				true,

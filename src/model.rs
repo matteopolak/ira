@@ -8,7 +8,7 @@ use std::{
 };
 
 use bytemuck::{Pod, Zeroable};
-use glam::Vec3;
+use glam::{Mat4, Vec3};
 use gltf::Gltf;
 use wgpu::util::DeviceExt;
 
@@ -56,6 +56,52 @@ pub struct Model {
 	pub meshes: Meshes,
 	pub materials: Vec<GpuMaterial>,
 	pub centroid: Vec3,
+
+	pub instances: Vec<Instance>,
+}
+
+pub struct GpuModel {
+	pub model: Model,
+	pub instance_buffer: wgpu::Buffer,
+	pub instances: Vec<GpuInstance>,
+}
+
+#[derive(Debug, Default)]
+pub struct Instance {
+	pub position: Vec3,
+	pub rotation: glam::Quat,
+}
+
+#[repr(C)]
+#[derive(Copy, Clone, Debug, Pod, Zeroable)]
+pub struct GpuInstance {
+	pub model: [[f32; 4]; 4],
+}
+
+impl Instance {
+	const VERTICES: [wgpu::VertexAttribute; 4] = wgpu::vertex_attr_array![
+		5 => Float32x4,
+		6 => Float32x4,
+		7 => Float32x4,
+		8 => Float32x4,
+	];
+
+	#[must_use]
+	pub fn desc() -> wgpu::VertexBufferLayout<'static> {
+		use std::mem;
+		wgpu::VertexBufferLayout {
+			array_stride: mem::size_of::<GpuInstance>() as wgpu::BufferAddress,
+			step_mode: wgpu::VertexStepMode::Instance,
+			attributes: &Self::VERTICES,
+		}
+	}
+
+	fn to_gpu(&self) -> GpuInstance {
+		GpuInstance {
+			model: (Mat4::from_translation(self.position) * Mat4::from_quat(self.rotation))
+				.to_cols_array_2d(),
+		}
+	}
 }
 
 #[derive(Debug)]
@@ -74,6 +120,26 @@ pub struct GpuMaterial {
 }
 
 impl Model {
+	pub fn into_gpu(self, device: &wgpu::Device) -> GpuModel {
+		let instances = self
+			.instances
+			.iter()
+			.map(Instance::to_gpu)
+			.collect::<Vec<_>>();
+
+		let instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+			label: Some("Instance Buffer"),
+			contents: bytemuck::cast_slice(&instances),
+			usage: wgpu::BufferUsages::VERTEX,
+		});
+
+		GpuModel {
+			model: self,
+			instance_buffer,
+			instances,
+		}
+	}
+
 	/// Load a model from a glTF or OBJ file.
 	///
 	/// # Errors
@@ -220,11 +286,16 @@ impl Model {
 
 		centroid /= num_vertices as f32;
 
-		Ok(Model {
+		Ok(Model::new(meshes, materials, centroid))
+	}
+
+	pub fn new(meshes: Meshes, materials: Vec<GpuMaterial>, centroid: Vec3) -> Self {
+		Self {
 			meshes,
 			materials,
 			centroid,
-		})
+			instances: vec![Instance::default()],
+		}
 	}
 
 	/// Loads a model from an OBJ file.
@@ -342,11 +413,7 @@ impl Model {
 
 		centroid /= num_vertices as f32;
 
-		Ok(Model {
-			meshes,
-			materials,
-			centroid,
-		})
+		Ok(Model::new(meshes, materials, centroid))
 	}
 }
 
@@ -362,30 +429,11 @@ pub trait DrawModel<'a> {
 
 	fn draw_model_instanced(
 		&mut self,
-		model: &'a Model,
-		instances: Range<u32>,
+		gpu_model: &'a GpuModel,
 		camera_bind_group: &'a wgpu::BindGroup,
 		light_bind_group: &'a wgpu::BindGroup,
 		transparent: bool,
-	) {
-		let meshes = if transparent {
-			&model.meshes.transparent
-		} else {
-			&model.meshes.opaque
-		};
-
-		for mesh in meshes {
-			let material = &model.materials[mesh.material];
-
-			self.draw_mesh_instanced(
-				mesh,
-				material,
-				instances.clone(),
-				camera_bind_group,
-				light_bind_group,
-			);
-		}
-	}
+	);
 }
 
 impl<'a, 'b> DrawModel<'b> for wgpu::RenderPass<'a>
@@ -406,5 +454,35 @@ where
 		self.set_bind_group(1, camera_bind_group, &[]);
 		self.set_bind_group(2, light_bind_group, &[]);
 		self.draw_indexed(0..mesh.num_elements, 0, instances);
+	}
+
+	fn draw_model_instanced(
+		&mut self,
+		gpu_model: &'b GpuModel,
+		camera_bind_group: &'b wgpu::BindGroup,
+		light_bind_group: &'b wgpu::BindGroup,
+		transparent: bool,
+	) {
+		let model = &gpu_model.model;
+
+		let meshes = if transparent {
+			&model.meshes.transparent
+		} else {
+			&model.meshes.opaque
+		};
+
+		self.set_vertex_buffer(1, gpu_model.instance_buffer.slice(..));
+
+		for mesh in meshes {
+			let material = &model.materials[mesh.material];
+
+			self.draw_mesh_instanced(
+				mesh,
+				material,
+				0..model.instances.len() as u32,
+				camera_bind_group,
+				light_bind_group,
+			);
+		}
 	}
 }
