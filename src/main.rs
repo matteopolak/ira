@@ -8,8 +8,8 @@ use winit::{
 	application::ApplicationHandler,
 	event::{DeviceEvent, KeyEvent, MouseButton, WindowEvent},
 	event_loop::{ActiveEventLoop, EventLoop},
-	keyboard::PhysicalKey,
-	window::{CursorGrabMode, Window, WindowAttributes, WindowId},
+	keyboard::{KeyCode, PhysicalKey},
+	window::{CursorGrabMode, Fullscreen, Window, WindowAttributes, WindowId},
 };
 
 #[derive(Default)]
@@ -484,7 +484,25 @@ impl ApplicationHandler for App {
 					},
 				..
 			} => {
-				app.controller.process_keyboard(key, state);
+				if app.controller.process_keyboard(key, state) {
+					return;
+				}
+
+				if state.is_pressed() {
+					match key {
+						KeyCode::Escape => {
+							app.window.set_cursor_grab(CursorGrabMode::None).unwrap();
+						}
+						KeyCode::F11 if app.window.fullscreen().is_none() => {
+							app.window
+								.set_fullscreen(Some(Fullscreen::Borderless(None)));
+						}
+						KeyCode::F11 => {
+							app.window.set_fullscreen(None);
+						}
+						_ => {}
+					}
+				}
 			}
 			WindowEvent::MouseWheel { delta, .. } => {
 				app.controller.process_scroll(&delta);
