@@ -19,7 +19,7 @@ impl Default for Light {
 			_padding: 0,
 			// warm yellow
 			color: [1.0, 0.9, 0.8],
-			intensity: 20.0,
+			intensity: 5.0,
 		}
 	}
 }
@@ -30,7 +30,7 @@ impl Light {
 	#[must_use]
 	pub fn from_model(model: &Model) -> Self {
 		let centroid = model.centroid;
-		let position = centroid + Vec3::Y * 10_000.0 - Vec3::X * 5_000.0;
+		let position = centroid + Vec3::Y * 10_000.0;
 
 		Self {
 			position: position.into(),

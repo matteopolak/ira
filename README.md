@@ -7,7 +7,7 @@ A general-purpose, code-first game engine.
 ### Basic gLTF rendering
 
 ```rust
-use ira::{glam::Vec3, winit, App, Model};
+use ira::{glam::Vec3, pollster, winit, App, Instance, Model};
 
 fn main() -> Result<(), winit::error::EventLoopError> {
   let app = App::new(|state| {
@@ -17,10 +17,10 @@ fn main() -> Result<(), winit::error::EventLoopError> {
         &state.device,
         &state.queue,
         &state.material_bind_group_layout,
-        Vec3::Z,
       )
       .await
       .unwrap()
+      .with_instance(Instance::from_up(Vec3::ZERO, Vec3::Z))
       .into_gpu(&state.device);
 
       state.models.push(gpu_model);
@@ -32,3 +32,4 @@ fn main() -> Result<(), winit::error::EventLoopError> {
 ```
 
 More examples can be found in the [`examples`](examples) directory.
+

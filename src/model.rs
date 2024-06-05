@@ -67,12 +67,14 @@ pub struct GpuModel {
 	pub instances: Vec<GpuInstance>,
 }
 
+#[must_use]
 #[derive(Debug, Default)]
 pub struct Instance {
 	pub position: Vec3,
 	pub rotation: glam::Quat,
 }
 
+#[must_use]
 #[repr(C)]
 #[derive(Copy, Clone, Debug, Pod, Zeroable)]
 pub struct GpuInstance {
@@ -81,15 +83,14 @@ pub struct GpuInstance {
 
 impl Instance {
 	const VERTICES: [wgpu::VertexAttribute; 4] = wgpu::vertex_attr_array![
+		3 => Float32x4,
+		4 => Float32x4,
 		5 => Float32x4,
 		6 => Float32x4,
-		7 => Float32x4,
-		8 => Float32x4,
 	];
 
 	#[must_use]
 	pub fn desc() -> wgpu::VertexBufferLayout<'static> {
-		use std::mem;
 		wgpu::VertexBufferLayout {
 			array_stride: mem::size_of::<GpuInstance>() as wgpu::BufferAddress,
 			step_mode: wgpu::VertexStepMode::Instance,
@@ -97,7 +98,22 @@ impl Instance {
 		}
 	}
 
-	fn to_gpu(&self) -> GpuInstance {
+	pub fn new(position: Vec3, rotation: glam::Quat) -> Self {
+		Self { position, rotation }
+	}
+
+	/// Creates an instance with the given position and up vector.
+	///
+	/// This is particularly useful when importing a model with a different up vector.
+	/// The up vector used in Ira is [`Vec3::Y`].
+	pub fn from_up(position: Vec3, up: Vec3) -> Self {
+		Self {
+			position,
+			rotation: glam::Quat::from_rotation_arc(up, Vec3::Y),
+		}
+	}
+
+	pub fn to_gpu(&self) -> GpuInstance {
 		GpuInstance {
 			model: (Mat4::from_translation(self.position) * Mat4::from_quat(self.rotation))
 				.to_cols_array_2d(),
@@ -141,6 +157,11 @@ impl Model {
 		}
 	}
 
+	pub fn with_instance(mut self, instance: Instance) -> Self {
+		self.instances.push(instance);
+		self
+	}
+
 	/// Load a model from a glTF or OBJ file.
 	///
 	/// # Errors
@@ -150,14 +171,13 @@ impl Model {
 		device: &wgpu::Device,
 		queue: &wgpu::Queue,
 		layout: &wgpu::BindGroupLayout,
-		up: Vec3,
 	) -> anyhow::Result<Self>
 	where
 		P: AsRef<Path> + fmt::Debug,
 	{
 		match path.as_ref().extension().and_then(|s| s.to_str()) {
 			Some("obj") => Self::from_path_obj(path, device, queue, layout).await,
-			Some("gltf") => Self::from_path_gltf(path, device, queue, layout, up).await,
+			Some("gltf") => Self::from_path_gltf(path, device, queue, layout).await,
 			_ => Err(anyhow::anyhow!("Unsupported model format")),
 		}
 	}
@@ -172,7 +192,6 @@ impl Model {
 		device: &wgpu::Device,
 		queue: &wgpu::Queue,
 		layout: &wgpu::BindGroupLayout,
-		up: Vec3,
 	) -> anyhow::Result<Self>
 	where
 		P: AsRef<Path> + fmt::Debug,
@@ -225,28 +244,19 @@ impl Model {
 					.ok_or_else(|| anyhow::anyhow!("mesh primitive does not have normals"))?;
 				let tex_coords = reader.read_tex_coords(0);
 
-				// rotate them to that `up` is now Vec3::Y
-				let rotation = glam::Quat::from_rotation_arc(up, Vec3::Y);
-				let positions = positions.map(|p| rotation.mul_vec3(p.into()));
-				let normals = normals.map(|n| rotation.mul_vec3(n.into()));
-
 				if let Some(tex_coords) = tex_coords {
 					for ((position, normal), tex_coord) in
 						positions.zip(normals).zip(tex_coords.into_f32())
 					{
-						vertices.push(Vertex::new(
-							position.into(),
-							normal.into(),
-							tex_coord.map(f32::fract),
-						));
+						vertices.push(Vertex::new(position, normal, tex_coord.map(f32::fract)));
 
-						centroid += position;
+						centroid += Vec3::from(position);
 					}
 				} else {
 					for (position, normal) in positions.zip(normals) {
-						vertices.push(Vertex::new(position.into(), normal.into(), [0.0, 0.0]));
+						vertices.push(Vertex::new(position, normal, [0.0, 0.0]));
 
-						centroid += position;
+						centroid += Vec3::from(position);
 					}
 				}
 
@@ -295,7 +305,7 @@ impl Model {
 			meshes,
 			materials,
 			centroid,
-			instances: vec![Instance::default()],
+			instances: Vec::new(),
 		}
 	}
 

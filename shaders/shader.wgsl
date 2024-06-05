@@ -15,13 +15,20 @@ struct VertexInput {
 	@location(2) tex_coords: vec2<f32>,
 };
 
+struct InstanceInput {
+	@location(3) model_matrix_0: vec4<f32>,
+	@location(4) model_matrix_1: vec4<f32>,
+	@location(5) model_matrix_2: vec4<f32>,
+	@location(6) model_matrix_3: vec4<f32>,
+}
+
 struct VertexOutput {
 	@builtin(position) clip_position: vec4<f32>,
 	@location(0) tex_coords: vec2<f32>,
-	@location(1) world_position: vec3<f32>,
-	@location(2) world_normal: vec3<f32>,
-	@location(3) world_tangent: vec3<f32>,
-	@location(4) world_bitangent: vec3<f32>,
+	@location(1) world_normal: vec3<f32>,
+	@location(2) world_tangent: vec3<f32>,
+	@location(3) world_bitangent: vec3<f32>,
+	@location(4) world_position: vec3<f32>,
 };
 
 @group(1) @binding(0)
@@ -43,16 +50,22 @@ fn calculate_tangent(normal: vec3<f32>) -> vec3<f32> {
 }
 
 @vertex
-fn vs_main(model: VertexInput) -> VertexOutput {
+fn vs_main(model: VertexInput, instance: InstanceInput) -> VertexOutput {
+	let model_matrix = mat4x4<f32>(
+		instance.model_matrix_0,
+		instance.model_matrix_1,
+		instance.model_matrix_2,
+		instance.model_matrix_3,
+	);
+
 	var out: VertexOutput;
 
-	out.clip_position = camera.view_proj * vec4<f32>(model.position, 1.0);
 	out.tex_coords = model.tex_coords;
-	out.world_position = model.position;
-	out.world_normal = normalize(model.normal);
-	// TODO: calculate tangent and bitangent when processing the model
-	out.world_tangent = calculate_tangent(model.normal);
+	out.clip_position = camera.view_proj * model_matrix * vec4<f32>(model.position, 1.0);
+	out.world_normal = normalize((model_matrix * vec4<f32>(model.normal, 0.0)).xyz);
+	out.world_tangent = calculate_tangent(out.world_normal);
 	out.world_bitangent = cross(out.world_normal, out.world_tangent);
+	out.world_position = (model_matrix * vec4<f32>(model.position, 1.0)).xyz;
 
 	return out;
 }
@@ -72,7 +85,7 @@ fn vs_main(model: VertexInput) -> VertexOutput {
 @group(0) @binding(8) var<uniform> has_normal: f32;
 
 const pi = radians(180.0);
-const ambient_intensity = 0.1;
+const ambient_intensity = 0.2;
 
 fn geometry_schlick_ggx(n_dot_v: f32, k: f32) -> f32 {
 	let numerator = n_dot_v;
@@ -116,7 +129,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 	let metallic = metallic_roughness.b;
 
 	// [0, 1] to [-1, 1]
-	let normal = normalize((in.world_normal * (1.0 - has_normal) + bump * has_normal));
+	let normal = normalize((in.world_normal * (has_normal) + bump * (1.0 - has_normal)));
 	let ambient = ambient_intensity * albedo.rgb * ao;
 
 	// Reflectance at normal incidence (F0)

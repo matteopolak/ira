@@ -1,4 +1,4 @@
-use ira::{glam::Vec3, pollster, winit, App, Model};
+use ira::{glam::Vec3, pollster, winit, App, Instance, Model};
 
 fn main() -> Result<(), winit::error::EventLoopError> {
 	env_logger::init();
@@ -10,10 +10,11 @@ fn main() -> Result<(), winit::error::EventLoopError> {
 				&state.device,
 				&state.queue,
 				&state.material_bind_group_layout,
-				Vec3::Z,
 			)
 			.await
 			.unwrap()
+			.with_instance(Instance::from_up(Vec3::ZERO, Vec3::Z))
+			.with_instance(Instance::from_up(Vec3::ONE * 5., Vec3::Z))
 			.into_gpu(&state.device);
 
 			state.models.push(gpu_model);
