@@ -85,29 +85,32 @@ fn vs_main(model: VertexInput, instance: InstanceInput) -> VertexOutput {
 @group(0) @binding(8) var<uniform> has_normal: f32;
 
 const pi = radians(180.0);
-const ambient_intensity = 0.2;
 
-fn geometry_schlick_ggx(n_dot_v: f32, k: f32) -> f32 {
+fn geometry_schlick_ggx(n_dot_v: f32, roughness: f32) -> f32 {
+	let r = roughness + 1.0;
+	let k = (r * r) / 8.0;
+
 	let numerator = n_dot_v;
 	let denominator = n_dot_v * (1.0 - k) + k;
 
 	return numerator / denominator;
 }
 
-fn geometry_smith(n: vec3<f32>, v: vec3<f32>, l: vec3<f32>, k: f32) -> f32 {
+fn geometry_smith(n: vec3<f32>, v: vec3<f32>, l: vec3<f32>, roughness: f32) -> f32 {
 	let n_dot_v = max(dot(n, v), 0.0);
 	let n_dot_l = max(dot(n, l), 0.0);
-	let ggx1 = geometry_schlick_ggx(n_dot_v, k);
-	let ggx2 = geometry_schlick_ggx(n_dot_l, k);
+	let ggx1 = geometry_schlick_ggx(n_dot_v, roughness);
+	let ggx2 = geometry_schlick_ggx(n_dot_l, roughness);
 
 	return ggx1 * ggx2;
 }
 
-fn fresnel_schlick(v_dot_h: f32, f0: vec3<f32>) -> vec3<f32> {
-	return f0 + (vec3<f32>(1.0) - f0) * pow(1.0 - v_dot_h, 5.0);
+fn fresnel_schlick(h_dot_v: f32, f0: vec3<f32>) -> vec3<f32> {
+	return f0 + (vec3<f32>(1.0) - f0) * pow(clamp(1.0 - h_dot_v, 0.0, 1.0), 5.0);
 }
 
-fn distribution_ggx(n: vec3<f32>, h: vec3<f32>, a: f32) -> f32 {
+fn distribution_ggx(n: vec3<f32>, h: vec3<f32>, roughness: f32) -> f32 {
+	let a = roughness * roughness;
 	let a2 = a * a;
 	let n_dot_h = max(dot(n, h), 0.0);
 	let n_dot_h2 = n_dot_h * n_dot_h;
@@ -120,7 +123,8 @@ fn distribution_ggx(n: vec3<f32>, h: vec3<f32>, a: f32) -> f32 {
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-	let albedo = textureSample(t_diffuse, s_diffuse, in.tex_coords);
+	let albedo_raw = textureSample(t_diffuse, s_diffuse, in.tex_coords);
+	let albedo = pow(albedo_raw.rgb, vec3<f32>(2.2));
 	let bump = textureSample(t_normal, s_normal, in.tex_coords).rgb;
 	let metallic_roughness = textureSample(t_metallic_roughness, s_metallic_roughness, in.tex_coords);
 	let ao = textureSample(t_ao, s_ao, in.tex_coords).r;
@@ -128,40 +132,49 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 	let roughness = metallic_roughness.g;
 	let metallic = metallic_roughness.b;
 
-	// [0, 1] to [-1, 1]
-	let normal = normalize((in.world_normal * (has_normal) + bump * (1.0 - has_normal)));
-	let ambient = ambient_intensity * albedo.rgb * ao;
-
 	// Reflectance at normal incidence (F0)
 	let f0 = mix(vec3<f32>(0.04), albedo.rgb, metallic);
 
-	// Light properties
-	let light_dir = normalize(light.position - in.world_position);
-	let view_dir = normalize(camera.view_pos - in.world_position);
-	let half_vec = normalize(view_dir + light_dir);
+	let n = normalize((in.world_normal * (1.0 - has_normal) + bump * (has_normal)));
+	let v = normalize(camera.view_pos - in.world_position);
 
-	// Cook-Torrance BRDF
-	let n_dot_l = max(dot(normal, light_dir), 0.0);
-	let n_dot_v = max(dot(normal, view_dir), 0.0);
-	let v_dot_h = dot(view_dir, half_vec);
+	var lo = vec3<f32>(0.0);
 
-	let d = distribution_ggx(normal, half_vec, roughness);
-	let g = geometry_smith(normal, view_dir, light_dir, roughness);
-	let f = fresnel_schlick(v_dot_h, f0);
+	for (var i = 0; i < 1; i++) {
+		let l = normalize(light.position - in.world_position);
+		let h = normalize(v + l);
+		let distance = length(light.position - in.world_position);
+		let attenuation = 1.0 / (distance * distance);
+		let radiance = light.color * light.intensity * attenuation;
 
-	let k_s = f;
-	let k_d = (vec3<f32>(1.0) - k_s) * (1.0 - metallic);
+		// cook-torrance brdf
+		let f = fresnel_schlick(max(dot(h, v), 0.0), f0);
+		let ndf = distribution_ggx(n, h, roughness);
+		let g = geometry_smith(n, v, l, roughness);
 
-	let numerator = d * g * f;
-	let denominator = 4.0 * n_dot_v * n_dot_l + 0.001; // Prevent divide by zero
-	let specular = numerator / denominator;
+		let numerator = ndf * g * f;
+		let denominator = 4.0 * max(dot(n, v), 0.0) * max(dot(n, l), 0.0) + 0.0001;
+		let specular = numerator / denominator;
 
-	let radiance = light.color * light.intensity;
-	let diffuse = k_d * albedo.rgb / pi;
+		// calculate ratio of refraction
+		let k_s = f;
+		let k_d = (vec3<f32>(1.0) - k_s) * (1.0 - metallic);
 
-	// Combine components
-	let final_color = (diffuse + specular) * radiance * n_dot_l + ambient;
+		let n_dot_l = max(dot(n, l), 0.0);
 
-	// return vec4<f32>(normal, 1.0);
-	return vec4<f32>(final_color, albedo.a);
+		// add to outgoing radiance Lo
+		lo += (k_d * albedo / pi + specular) * radiance * n_dot_l;
+	}
+
+	// [0, 1] to [-1, 1]
+	let ambient = vec3<f32>(0.03) * albedo * ao;
+
+	var color = ambient + lo;
+
+	// tone mapping
+	color = color / (color + vec3<f32>(1.0));
+	color = pow(color, vec3<f32>(1.0 / 2.2));
+
+	return vec4<f32>(color, albedo_raw.a);
 }
+

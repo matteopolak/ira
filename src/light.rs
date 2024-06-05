@@ -19,7 +19,7 @@ impl Default for Light {
 			_padding: 0,
 			// warm yellow
 			color: [1.0, 0.9, 0.8],
-			intensity: 5.0,
+			intensity: 20.0,
 		}
 	}
 }

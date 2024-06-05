@@ -155,8 +155,7 @@ impl State {
 		let camera = camera::Camera::new(&camera_builder).create_on_device(&device);
 		let controller = camera::CameraController::new(camera, camera_builder);
 
-		let light =
-			light::Light::from_position(Vec3::new(0.0, 10_000.0, 0.0)).create_on_device(&device);
+		let light = light::Light::from_position(Vec3::new(0.0, 2.0, 0.0)).create_on_device(&device);
 
 		let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
 			label: None,
