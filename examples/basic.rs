@@ -6,14 +6,14 @@ fn main() -> Result<(), winit::error::EventLoopError> {
 	let app = App::new(|state| {
 		pollster::block_on(async {
 			let gpu_model = Model::from_path(
-				"models/gelatinous_cube/scene.gltf",
+				"models/bottled_car/scene.gltf",
 				&state.device,
 				&state.queue,
 				&state.material_bind_group_layout,
 			)
 			.await
 			.unwrap()
-			.with_instance(Instance::from_up(Vec3::ZERO, Vec3::Y))
+			.with_instance(Instance::from_up(Vec3::ZERO, Vec3::Z))
 			.into_gpu(&state.device);
 
 			state.models.push(gpu_model);

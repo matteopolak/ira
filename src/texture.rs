@@ -2,6 +2,7 @@ use std::path::Path;
 
 use anyhow::{anyhow, Ok, Result};
 use glam::{Vec2, Vec3};
+use image::{ColorType, GenericImageView, ImageDecoder};
 use wgpu::util::DeviceExt;
 
 use crate::Vertex;
@@ -147,6 +148,10 @@ impl Texture {
 		Ok(Self::from_image(device, queue, image.into(), label))
 	}
 
+	/// Creates a new texture from an image.
+	///
+	/// # Panics
+	/// Panics if the image format is not `Rgba8`, `Rgba16`, or `Rgba32F`.
 	#[must_use]
 	pub fn from_image(
 		device: &wgpu::Device,
@@ -165,7 +170,10 @@ impl Texture {
 			mip_level_count: 1,
 			sample_count: 1,
 			dimension: wgpu::TextureDimension::D2,
-			format: wgpu::TextureFormat::Rgba8UnormSrgb,
+			format: match image.data {
+				ImageData::Rgba8(..) => wgpu::TextureFormat::Rgba8UnormSrgb,
+				ImageData::Rgba32F(..) => wgpu::TextureFormat::Rgba32Float,
+			},
 			usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
 			view_formats: &[],
 		});
@@ -180,7 +188,12 @@ impl Texture {
 			image.data.as_ref(),
 			wgpu::ImageDataLayout {
 				offset: 0,
-				bytes_per_row: Some(4 * image.dimensions.0),
+				bytes_per_row: Some(
+					match image.data {
+						ImageData::Rgba8(..) => 4 * image.dimensions.0,
+						ImageData::Rgba32F(..) => 16 * image.dimensions.0,
+					} * image.dimensions.0,
+				),
 				rows_per_image: Some(image.dimensions.1),
 			},
 			size,
@@ -205,18 +218,56 @@ impl Texture {
 			tex_coord: None,
 		}
 	}
+
+	/// Creates a new texture from an HDR image file.
+	///
+	/// # Errors
+	/// See [`Texture::try_from_path`] for more information.
+	pub fn try_from_hdr_path<P: AsRef<Path>>(
+		device: &wgpu::Device,
+		queue: &wgpu::Queue,
+		path: P,
+		label: &str,
+	) -> Result<Self> {
+		let image = image::open(path)?.into_rgba32f();
+		let dimensions = image.dimensions();
+		let image = Image {
+			data: ImageData::Rgba32F(image.into_raw()),
+			dimensions,
+		};
+
+		Ok(Self::from_image(device, queue, image, Some(label)))
+	}
 }
 
-/// RGBA8 image data.
 #[derive(Debug)]
 pub struct Image {
-	pub data: Vec<u8>,
+	pub data: ImageData,
 	pub dimensions: (u32, u32),
+}
+
+#[derive(Debug)]
+pub enum ImageData {
+	Rgba8(Vec<u8>),
+	Rgba32F(Vec<f32>),
+}
+
+impl AsRef<[u8]> for ImageData {
+	fn as_ref(&self) -> &[u8] {
+		match self {
+			ImageData::Rgba8(data) => data,
+			ImageData::Rgba32F(data) => bytemuck::cast_slice(data),
+		}
+	}
 }
 
 impl Image {
 	pub fn blend(&mut self, base: [f32; 4]) {
-		for pixel in self.data.chunks_exact_mut(4) {
+		let ImageData::Rgba8(data) = &mut self.data else {
+			return;
+		};
+
+		for pixel in data.chunks_exact_mut(4) {
 			for (p, b) in pixel.iter_mut().zip(base.iter()) {
 				*p = (f32::from(*p) * b) as u8;
 			}
@@ -225,19 +276,29 @@ impl Image {
 
 	#[must_use]
 	pub fn is_transparent(&self) -> bool {
-		self.data.chunks_exact(4).any(|pixel| pixel[3] < 255)
+		let ImageData::Rgba8(data) = &self.data else {
+			return false;
+		};
+
+		data.chunks_exact(4).any(|pixel| pixel[3] < 255)
 	}
 }
 
 impl From<image::DynamicImage> for Image {
-	fn from(img: image::DynamicImage) -> Self {
-		let rgba = img.into_rgba8();
-		let dimensions = rgba.dimensions();
+	fn from(image: image::DynamicImage) -> Self {
+		let dimensions = image.dimensions();
+		// keep RGBA32F, convert RGB32F to RGBA32F
+		// everything else, convert to RGBA8
+		let data = match image {
+			image::DynamicImage::ImageRgba8(img) => ImageData::Rgba8(img.into_raw()),
+			img @ image::DynamicImage::ImageRgb32F(..) => {
+				ImageData::Rgba32F(img.into_rgba32f().into_raw())
+			}
+			image::DynamicImage::ImageRgba32F(img) => ImageData::Rgba32F(img.into_raw()),
+			other => ImageData::Rgba8(other.into_rgba8().into_raw()),
+		};
 
-		Self {
-			data: rgba.into_raw(),
-			dimensions,
-		}
+		Self { data, dimensions }
 	}
 }
 
@@ -268,7 +329,7 @@ impl TryFrom<gltf::image::Data> for Image {
 		};
 
 		Ok(Self {
-			data: image.into_rgba8().into_raw(),
+			data: ImageData::Rgba8(image.into_rgba8().into_raw()),
 			dimensions,
 		})
 	}

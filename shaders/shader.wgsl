@@ -1,20 +1,20 @@
 struct CameraUniform {
 	view_proj: mat4x4<f32>,
 	view_pos: vec3<f32>,
-};
+}
 
 struct Light {
 	position: vec3<f32>,
 	color: vec3<f32>,
 	intensity: f32,
-};
+}
 
 struct VertexInput {
 	@location(0) position: vec3<f32>,
 	@location(1) normal: vec3<f32>,
 	@location(2) tex_coords: vec2<f32>,
 	@location(3) tangent: vec3<f32>,
-};
+}
 
 struct InstanceInput {
 	@location(4) model_matrix_0: vec4<f32>,
@@ -31,7 +31,7 @@ struct VertexOutput {
 	@location(3) tbn_matrix_1: vec3<f32>,
 	@location(4) tbn_matrix_2: vec3<f32>,
 	@location(5) normal: vec3<f32>,
-};
+}
 
 @group(1) @binding(0)
 var<uniform> camera: CameraUniform;
