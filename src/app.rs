@@ -155,7 +155,7 @@ impl State {
 		let camera = camera::Camera::new(&camera_builder).create_on_device(&device);
 		let controller = camera::CameraController::new(camera, camera_builder);
 
-		let light = light::Light::from_position(Vec3::new(0.0, 1.0, 0.0)).create_on_device(&device);
+		let light = light::Light::from_position(Vec3::new(0.0, 2.0, 0.0)).create_on_device(&device);
 
 		let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
 			label: None,
@@ -168,26 +168,6 @@ impl State {
 		});
 
 		let swapchain_capabilities = surface.get_capabilities(&adapter);
-		let transparent_target = wgpu::ColorTargetState {
-			format: swapchain_capabilities.formats[0],
-			blend: Some(wgpu::BlendState {
-				color: wgpu::BlendComponent {
-					src_factor: wgpu::BlendFactor::SrcAlpha,
-					dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
-					operation: wgpu::BlendOperation::Add,
-				},
-				alpha: wgpu::BlendComponent {
-					src_factor: wgpu::BlendFactor::One,
-					dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
-					operation: wgpu::BlendOperation::Add,
-				},
-			}),
-			write_mask: wgpu::ColorWrites::COLOR,
-		};
-
-		let transparent_render_pipeline =
-			create_render_pipeline(&device, &pipeline_layout, transparent_target, true, &shader);
-
 		let opaque_render_pipeline = create_render_pipeline(
 			&device,
 			&pipeline_layout,
@@ -199,6 +179,33 @@ impl State {
 			true,
 			&shader,
 		);
+
+		let transparent_render_pipeline = {
+			let transparent_target = wgpu::ColorTargetState {
+				format: swapchain_capabilities.formats[0],
+				blend: Some(wgpu::BlendState {
+					color: wgpu::BlendComponent {
+						src_factor: wgpu::BlendFactor::SrcAlpha,
+						dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+						operation: wgpu::BlendOperation::Add,
+					},
+					alpha: wgpu::BlendComponent {
+						src_factor: wgpu::BlendFactor::One,
+						dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+						operation: wgpu::BlendOperation::Add,
+					},
+				}),
+				write_mask: wgpu::ColorWrites::COLOR,
+			};
+
+			create_render_pipeline(
+				&device,
+				&pipeline_layout,
+				transparent_target,
+				false,
+				&shader,
+			)
+		};
 
 		Self {
 			window,

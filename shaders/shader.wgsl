@@ -94,12 +94,12 @@ fn vs_main(model: VertexInput, instance: InstanceInput) -> VertexOutput {
 
 const pi = radians(180.0);
 
-fn geometry_schlick_ggx(n_dot_v: f32, roughness: f32) -> f32 {
+fn geometry_schlick_ggx(cos_theta: f32, roughness: f32) -> f32 {
 	let r = roughness + 1.0;
 	let k = (r * r) / 8.0;
 
-	let numerator = n_dot_v;
-	let denominator = n_dot_v * (1.0 - k) + k;
+	let numerator = cos_theta;
+	let denominator = cos_theta * (1.0 - k) + k;
 
 	return numerator / denominator;
 }
@@ -146,23 +146,22 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 		in.tbn_matrix_2,
 	);
 	let n = normalize(tbn * (2.0 * normal_map - 1.0));
-
-	let f0 = mix(vec3<f32>(0.04), albedo.rgb, metallic);
 	let v = normalize(camera.view_pos - in.world_position);
+	let f0 = mix(vec3<f32>(0.04), albedo.rgb, metallic);
 
 	var lo = vec3<f32>(0.0);
 
-	for (var i = 0; i < 1; i++) {
+	//for (var i = 0; i < 1; i++) {
 		let l = normalize(light.position - in.world_position);
 		let h = normalize(v + l);
 		let distance = length(light.position - in.world_position);
 		let attenuation = 1.0 / (distance * distance);
-		let radiance = light.color * light.intensity * attenuation;
+		let radiance = light.color * attenuation;
 
 		// cook-torrance brdf
-		let f = fresnel_schlick(max(dot(h, v), 0.0), f0);
 		let ndf = distribution_ggx(n, h, roughness);
 		let g = geometry_smith(n, v, l, roughness);
+		let f = fresnel_schlick(max(dot(h, v), 0.0), f0);
 
 		let numerator = ndf * g * f;
 		let denominator = 4.0 * max(dot(n, v), 0.0) * max(dot(n, l), 0.0) + 0.0001;
@@ -173,18 +172,20 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 		let k_d = (vec3<f32>(1.0) - k_s) * (1.0 - metallic);
 
 		let n_dot_l = max(dot(n, l), 0.0);
+		let diffuse = k_d * albedo / pi;
 
 		// add to outgoing radiance Lo
-		lo += (k_d * albedo / pi + specular) * radiance * n_dot_l;
-	}
+		lo += (diffuse + specular) * radiance * n_dot_l;
+	//}
 
 	let ambient = vec3<f32>(0.03) * albedo * ao;
 	var color = ambient + lo;
 
 	// tone mapping
 	color = color / (color + vec3<f32>(1.0));
+	// gamma correction
 	color = pow(color, vec3<f32>(1.0 / 2.2));
 
-	return vec4<f32>(color, 1.0);
+	return vec4<f32>(color, albedo_raw.a);
 }
 

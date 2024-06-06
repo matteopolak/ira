@@ -6,7 +6,7 @@ fn main() -> Result<(), winit::error::EventLoopError> {
 	let app = App::new(|state| {
 		pollster::block_on(async {
 			let gpu_model = Model::from_path(
-				"models/silver_ball/scene.gltf",
+				"models/gelatinous_cube/scene.gltf",
 				&state.device,
 				&state.queue,
 				&state.material_bind_group_layout,
