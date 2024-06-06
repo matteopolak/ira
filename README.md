@@ -25,6 +25,8 @@ fn main() -> Result<(), winit::error::EventLoopError> {
 
       state.models.push(gpu_model);
     });
+
+    state.controller.camera.recreate_bind_group(&state.device);
   });
 
   app.run()
