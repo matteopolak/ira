@@ -105,7 +105,7 @@ pub struct State {
 	depth_texture: texture::Texture,
 	pub models: Vec<model::GpuModel>,
 
-	light: light::GpuLight,
+	lights: light::Lights,
 
 	last_frame: time::Instant,
 }
@@ -155,14 +155,20 @@ impl State {
 		let camera = camera::Camera::new(&camera_builder).create_on_device(&device);
 		let controller = camera::CameraController::new(camera, camera_builder);
 
-		let light = light::Light::from_position(Vec3::new(0.0, 2.0, 0.0)).create_on_device(&device);
+		let lights = light::Lights::from_lights(
+			&[
+				light::GpuLight::from_position(Vec3::new(0.0, 2.0, 0.0)),
+				light::GpuLight::from_position(Vec3::new(2.0, 0.0, 0.0)),
+			],
+			&device,
+		);
 
 		let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
 			label: None,
 			bind_group_layouts: &[
 				&material_bind_group_layout,
 				&controller.camera.bind_group_layout,
-				&light.bind_group_layout,
+				&lights.bind_group_layout,
 			],
 			push_constant_ranges: &[],
 		});
@@ -223,7 +229,7 @@ impl State {
 			depth_texture,
 
 			models: Vec::new(),
-			light,
+			lights,
 
 			last_frame: time::Instant::now(),
 		}
@@ -288,7 +294,7 @@ impl State {
 			rpass.draw_model_instanced(
 				model,
 				&self.controller.camera.bind_group,
-				&self.light.bind_group,
+				&self.lights.bind_group,
 				false,
 			);
 		}
@@ -323,7 +329,7 @@ impl State {
 			rpass.draw_model_instanced(
 				model,
 				&self.controller.camera.bind_group,
-				&self.light.bind_group,
+				&self.lights.bind_group,
 				true,
 			);
 		}

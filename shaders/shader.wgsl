@@ -37,7 +37,7 @@ struct VertexOutput {
 var<uniform> camera: CameraUniform;
 
 @group(2) @binding(0)
-var<uniform> light: Light;
+var<uniform> lights: array<Light, 2>;
 
 fn calculate_tangent(normal: vec3<f32>) -> vec3<f32> {
 	var helper: vec3<f32>;
@@ -151,7 +151,9 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
 	var lo = vec3<f32>(0.0);
 
-	//for (var i = 0; i < 1; i++) {
+	for (var i = 0; i < 2; i++) {
+		let light = lights[i];
+
 		let l = normalize(light.position - in.world_position);
 		let h = normalize(v + l);
 		let distance = length(light.position - in.world_position);
@@ -176,7 +178,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
 		// add to outgoing radiance Lo
 		lo += (diffuse + specular) * radiance * n_dot_l;
-	//}
+	}
 
 	let ambient = vec3<f32>(0.03) * albedo * ao;
 	var color = ambient + lo;
