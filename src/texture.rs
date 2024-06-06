@@ -1,7 +1,10 @@
 use std::path::Path;
 
 use anyhow::{anyhow, Ok, Result};
+use glam::{Vec2, Vec3};
 use wgpu::util::DeviceExt;
+
+use crate::Vertex;
 
 #[derive(Debug)]
 pub struct Texture {
@@ -477,6 +480,13 @@ impl Material {
 	///
 	/// The material's textures are loaded from the same directory as the glTF file.
 	///
+	/// The following properties are currently supported:
+	/// - Base colour texture
+	/// - Normal texture
+	/// - Metallic roughness texture
+	/// - Ambient occlusion texture
+	/// - Alpha mode
+	///
 	/// # Errors
 	/// Returns an error if the material's textures cannot be loaded.
 	pub fn from_gltf_material(
@@ -527,14 +537,23 @@ impl Material {
 			},
 		)?;
 
-		let metallic_roughness_texture = material
-			.pbr_metallic_roughness()
+		let metallic_roughness = material.pbr_metallic_roughness();
+		let metallic_factor = metallic_roughness.metallic_factor();
+		let roughness_factor = metallic_roughness.roughness_factor();
+
+		let metallic_roughness_texture = metallic_roughness
 			.metallic_roughness_texture()
 			.map(|t| t.texture().source())
 			.map(|s| gltf::image::Data::from_source(s.source(), Some(root), &[]))
 			.transpose()?;
 		let metallic_roughness_texture = metallic_roughness_texture.map_or_else(
-			|| Ok(Texture::new_solid(device, queue, [0, 0, 0, 255])),
+			|| {
+				Ok(Texture::new_solid_f32(
+					device,
+					queue,
+					[0.0, roughness_factor, metallic_factor, 1.0],
+				))
+			},
 			|t| {
 				Image::try_from(t)
 					.map(|i| Texture::from_image(device, queue, i, Some("metallic roughness map")))
@@ -563,19 +582,46 @@ impl Material {
 			has_normal,
 		})
 	}
+}
 
-	/// Creates a new material from an OBJ material.
-	///
-	/// The material's textures are loaded from the same directory as the OBJ file.
-	///
-	/// # Errors
-	/// Returns an error if the material's textures cannot be loaded.
-	pub fn from_obj_material(
-		_device: &wgpu::Device,
-		_queue: &wgpu::Queue,
-		_material: &tobj::Material,
-		_root: &Path,
-	) -> Result<Self> {
-		todo!()
+pub fn compute_tangents(vertices: &mut [Vertex], indices: &[u32]) {
+	// compute tangents and bitangents
+	for i in 0..indices.len() / 3 {
+		let i0 = indices[i * 3] as usize;
+		let i1 = indices[i * 3 + 1] as usize;
+		let i2 = indices[i * 3 + 2] as usize;
+
+		let v0 = &vertices[i0];
+		let v1 = &vertices[i1];
+		let v2 = &vertices[i2];
+
+		let delta_pos1 = v1.position - v0.position;
+		let delta_pos2 = v2.position - v0.position;
+
+		let delta_uv1 = v1.tex_coords - v0.tex_coords;
+		let delta_uv2 = v2.tex_coords - v0.tex_coords;
+
+		let tangent = if delta_uv1 == Vec2::ZERO || delta_uv2 == Vec2::ZERO {
+			// Calculate a default tangent using the normal
+			let normal = v0.normal;
+			let auxiliary_vector = if normal.y.abs() > 0.99 {
+				Vec3::X
+			} else {
+				Vec3::Y
+			};
+
+			normal.cross(auxiliary_vector).normalize()
+		} else {
+			let r = 1.0 / (delta_uv1.x * delta_uv2.y - delta_uv1.y * delta_uv2.x);
+			(delta_pos1 * delta_uv2.y - delta_pos2 * delta_uv1.y) * r
+		};
+
+		vertices[i0].tangent += tangent;
+		vertices[i1].tangent += tangent;
+		vertices[i2].tangent += tangent;
+	}
+
+	for v in vertices {
+		v.tangent = v.tangent.normalize();
 	}
 }

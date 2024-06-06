@@ -1,30 +1,23 @@
-use std::{
-	fmt,
-	fs::File,
-	io::BufReader,
-	mem,
-	ops::Range,
-	path::{Path, PathBuf},
-};
+use std::{fmt, mem, ops::Range, path::Path};
 
 use bytemuck::{Pod, Zeroable};
-use glam::{Mat4, Vec3};
+use glam::{Mat4, Vec2, Vec3};
 use gltf::Gltf;
 use wgpu::util::DeviceExt;
 
 use crate::texture::{self, Material};
 
-#[repr(C)]
-#[derive(Copy, Clone, Debug, Pod, Zeroable)]
+#[derive(Debug)]
 pub struct Vertex {
-	pub position: [f32; 3],
-	pub normal: [f32; 3],
-	pub tex_coords: [f32; 2],
+	pub position: Vec3,
+	pub normal: Vec3,
+	pub tex_coords: Vec2,
+	pub tangent: Vec3,
 }
 
 impl Vertex {
-	pub const VERTICES: [wgpu::VertexAttribute; 3] =
-		wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Float32x2];
+	pub const VERTICES: [wgpu::VertexAttribute; 4] =
+		wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Float32x2, 3 => Float32x3];
 
 	#[must_use]
 	pub fn desc() -> wgpu::VertexBufferLayout<'static> {
@@ -36,13 +29,33 @@ impl Vertex {
 	}
 
 	#[must_use]
-	pub fn new(position: [f32; 3], normal: [f32; 3], tex_coords: [f32; 2]) -> Self {
+	pub fn new(position: Vec3, normal: Vec3, tex_coords: Vec2) -> Self {
 		Self {
 			position,
 			normal,
 			tex_coords,
+			tangent: Vec3::ZERO,
 		}
 	}
+
+	#[must_use]
+	pub fn into_gpu(self) -> GpuVertex {
+		GpuVertex {
+			position: self.position.into(),
+			normal: self.normal.into(),
+			tex_coords: self.tex_coords.into(),
+			tangent: self.tangent.into(),
+		}
+	}
+}
+
+#[repr(C)]
+#[derive(Copy, Clone, Debug, Pod, Zeroable)]
+pub struct GpuVertex {
+	pub position: [f32; 3],
+	pub normal: [f32; 3],
+	pub tex_coords: [f32; 2],
+	pub tangent: [f32; 3],
 }
 
 #[derive(Debug, Default)]
@@ -83,10 +96,10 @@ pub struct GpuInstance {
 
 impl Instance {
 	const VERTICES: [wgpu::VertexAttribute; 4] = wgpu::vertex_attr_array![
-		3 => Float32x4,
 		4 => Float32x4,
 		5 => Float32x4,
 		6 => Float32x4,
+		7 => Float32x4,
 	];
 
 	#[must_use]
@@ -176,9 +189,8 @@ impl Model {
 		P: AsRef<Path> + fmt::Debug,
 	{
 		match path.as_ref().extension().and_then(|s| s.to_str()) {
-			Some("obj") => Self::from_path_obj(path, device, queue, layout).await,
 			Some("gltf") => Self::from_path_gltf(path, device, queue, layout).await,
-			_ => Err(anyhow::anyhow!("Unsupported model format")),
+			_ => Err(anyhow::anyhow!("unsupported model format")),
 		}
 	}
 
@@ -230,8 +242,6 @@ impl Model {
 
 		for mesh in gltf.meshes() {
 			for primitive in mesh.primitives() {
-				let mut vertices = Vec::new();
-
 				let reader = primitive.reader(|buffer| Some(&buffers[buffer.index()]));
 
 				let material_index = primitive.material().index();
@@ -244,21 +254,29 @@ impl Model {
 					.ok_or_else(|| anyhow::anyhow!("mesh primitive does not have normals"))?;
 				let tex_coords = reader.read_tex_coords(0);
 
-				if let Some(tex_coords) = tex_coords {
-					for ((position, normal), tex_coord) in
-						positions.zip(normals).zip(tex_coords.into_f32())
-					{
-						vertices.push(Vertex::new(position, normal, tex_coord.map(f32::fract)));
+				let vertices = positions.zip(normals);
+				let mut vertices = if let Some(tex_coords) = tex_coords {
+					vertices
+						.zip(tex_coords.into_f32())
+						.map(|((position, normal), tex_coord)| {
+							centroid += Vec3::from(position);
 
-						centroid += Vec3::from(position);
-					}
+							Vertex::new(
+								position.into(),
+								normal.into(),
+								tex_coord.map(f32::fract).into(),
+							)
+						})
+						.collect::<Vec<_>>()
 				} else {
-					for (position, normal) in positions.zip(normals) {
-						vertices.push(Vertex::new(position, normal, [0.0, 0.0]));
+					vertices
+						.map(|(position, normal)| {
+							centroid += Vec3::from(position);
 
-						centroid += Vec3::from(position);
-					}
-				}
+							Vertex::new(position.into(), normal.into(), Vec2::ZERO)
+						})
+						.collect::<Vec<_>>()
+				};
 
 				num_vertices += vertices.len();
 
@@ -266,6 +284,13 @@ impl Model {
 					.read_indices()
 					.ok_or_else(|| anyhow::anyhow!("mesh primitive does not have indices"))?
 					.into_u32()
+					.collect::<Vec<_>>();
+
+				texture::compute_tangents(&mut vertices, &indices);
+
+				let vertices = vertices
+					.into_iter()
+					.map(Vertex::into_gpu)
 					.collect::<Vec<_>>();
 
 				let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -307,124 +332,6 @@ impl Model {
 			centroid,
 			instances: Vec::new(),
 		}
-	}
-
-	/// Loads a model from an OBJ file.
-	///
-	/// # Errors
-	/// Returns an error if the file cannot be read or the OBJ data is invalid.
-	/// Returns an error if the OBJ file references external data and the root path cannot be determined.
-	pub async fn from_path_obj<P>(
-		path: P,
-		device: &wgpu::Device,
-		queue: &wgpu::Queue,
-		layout: &wgpu::BindGroupLayout,
-	) -> anyhow::Result<Self>
-	where
-		P: AsRef<Path> + fmt::Debug,
-	{
-		let root = path
-			.as_ref()
-			.parent()
-			.ok_or_else(|| anyhow::anyhow!("expected path to file"))?;
-		let mut file = BufReader::new(File::open(&path)?);
-		let (models, obj_materials) = tobj::load_obj_buf_async(
-			&mut file,
-			&tobj::LoadOptions {
-				triangulate: true,
-				single_index: true,
-				..Default::default()
-			},
-			|p| async move {
-				let path = root.join(PathBuf::from(p));
-				let mut reader =
-					BufReader::new(File::open(&path).map_err(|_| tobj::LoadError::OpenFileFailed)?);
-
-				tobj::load_mtl_buf(&mut reader)
-			},
-		)
-		.await?;
-
-		let mut materials = Vec::new();
-
-		for material in obj_materials? {
-			let material = texture::Material::from_obj_material(device, queue, &material, root)?;
-			let bind_group = material.create_bind_group(device, layout);
-
-			materials.push(GpuMaterial {
-				material,
-				bind_group,
-			});
-		}
-
-		let mut centroid = Vec3::ZERO;
-		let mut num_vertices = 0;
-
-		let mut meshes = Meshes::default();
-
-		for model in models {
-			let mesh = &model.mesh;
-			let vertices = (0..mesh.positions.len() / 3)
-				.map(|i| {
-					let position = [
-						mesh.positions[i * 3],
-						mesh.positions[i * 3 + 1],
-						mesh.positions[i * 3 + 2],
-					];
-
-					centroid += Vec3::from(position);
-
-					/*if mesh.normals.is_empty() {
-						Vertex {
-							position,
-							tex_coords: [mesh.texcoords[i * 2], 1.0 - mesh.texcoords[i * 2 + 1]],
-							normal: [0.0, 0.0, 0.0],
-						}
-					} else {
-						Vertex {
-							position,
-							tex_coords: [mesh.texcoords[i * 2], 1.0 - mesh.texcoords[i * 2 + 1]],
-							normal: [
-								mesh.normals[i * 3],
-								mesh.normals[i * 3 + 1],
-								mesh.normals[i * 3 + 2],
-							],
-						}
-					}*/
-				})
-				.collect::<Vec<_>>();
-
-			num_vertices += vertices.len();
-
-			let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-				label: Some(&format!("{path:?} Vertex Buffer")),
-				contents: bytemuck::cast_slice(&vertices),
-				usage: wgpu::BufferUsages::VERTEX,
-			});
-			let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-				label: Some(&format!("{path:?} Index Buffer")),
-				contents: bytemuck::cast_slice(&mesh.indices),
-				usage: wgpu::BufferUsages::INDEX,
-			});
-
-			let mesh = Mesh {
-				name: model.name,
-				vertex_buffer,
-				index_buffer,
-				num_elements: mesh.indices.len() as u32,
-				material: mesh.material_id.unwrap_or(0),
-			};
-
-			if materials[mesh.material].material.transparent {
-				meshes.transparent.push(mesh);
-			} else {
-				meshes.opaque.push(mesh);
-			}
-		}
-
-		centroid /= num_vertices as f32;
-
-		Ok(Model::new(meshes, materials, centroid))
 	}
 }
 

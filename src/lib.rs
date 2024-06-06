@@ -1,3 +1,4 @@
+#![feature(iter_array_chunks)]
 #![warn(clippy::pedantic)]
 #![allow(clippy::unused_async)]
 #![allow(clippy::cast_possible_truncation)]

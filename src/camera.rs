@@ -145,6 +145,17 @@ impl GpuCamera {
 
 		queue.write_buffer(&self.buffer, 0, bytemuck::cast_slice(&[self.uniform]));
 	}
+
+	pub fn recreate_bind_group(&mut self, device: &wgpu::Device) {
+		self.bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+			layout: &self.bind_group_layout,
+			entries: &[wgpu::BindGroupEntry {
+				binding: 0,
+				resource: self.buffer.as_entire_binding(),
+			}],
+			label: Some("camera_bind_group"),
+		});
+	}
 }
 
 pub struct CameraController {

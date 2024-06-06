@@ -30,7 +30,6 @@ struct VertexOutput {
 	@location(2) tbn_matrix_0: vec3<f32>,
 	@location(3) tbn_matrix_1: vec3<f32>,
 	@location(4) tbn_matrix_2: vec3<f32>,
-	@location(5) normal: vec3<f32>,
 };
 
 @group(1) @binding(0)
@@ -68,14 +67,12 @@ fn vs_main(model: VertexInput, instance: InstanceInput) -> VertexOutput {
 	
 	let world_tangent = normalize((model_matrix * vec4<f32>(model.tangent, 0.0)).xyz);
 	let world_normal = normalize((model_matrix * vec4<f32>(model.normal, 0.0)).xyz);
-	let world_bitangent = normalize(cross(world_normal, world_tangent));
+	let world_bitangent = cross(world_normal, world_tangent);
 	let tbn = mat3x3<f32>(world_tangent, world_bitangent, world_normal);
 
 	out.tbn_matrix_0 = tbn[0];
 	out.tbn_matrix_1 = tbn[1];
 	out.tbn_matrix_2 = tbn[2];
-
-	out.normal = world_normal;
 
 	return out;
 }
@@ -185,6 +182,6 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 	color = color / (color + vec3<f32>(1.0));
 	color = pow(color, vec3<f32>(1.0 / 2.2));
 
-	return vec4<f32>(color, 1.0);
+	return vec4<f32>(color, albedo_raw.a);
 }
 
