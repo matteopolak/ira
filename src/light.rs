@@ -24,6 +24,8 @@ impl Default for GpuLight {
 	}
 }
 
+#[must_use]
+#[derive(Debug)]
 pub struct Lights {
 	pub lights: Vec<GpuLight>,
 	pub uniform_buffer: wgpu::Buffer,

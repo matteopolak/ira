@@ -75,7 +75,7 @@ fn create_render_pipeline(
 		depth_stencil: Some(wgpu::DepthStencilState {
 			format: texture::Texture::DEPTH_FORMAT,
 			depth_write_enabled,
-			depth_compare: wgpu::CompareFunction::Less,
+			depth_compare: wgpu::CompareFunction::LessEqual,
 			stencil: wgpu::StencilState::default(),
 			bias: wgpu::DepthBiasState::default(),
 		}),
@@ -110,6 +110,89 @@ pub struct State {
 	last_frame: time::Instant,
 }
 
+async fn request_device(adapter: &wgpu::Adapter) -> (wgpu::Device, wgpu::Queue) {
+	adapter
+		.request_device(
+			&wgpu::DeviceDescriptor {
+				label: None,
+				required_features: wgpu::Features::empty(),
+				required_limits: wgpu::Limits::downlevel_defaults()
+					.using_resolution(adapter.limits()),
+			},
+			None,
+		)
+		.await
+		.expect("failed to create device")
+}
+
+async fn request_adapter(instance: &wgpu::Instance, surface: &wgpu::Surface<'_>) -> wgpu::Adapter {
+	instance
+		.request_adapter(&wgpu::RequestAdapterOptions {
+			power_preference: wgpu::PowerPreference::default(),
+			force_fallback_adapter: false,
+			compatible_surface: Some(surface),
+		})
+		.await
+		.expect("failed to find an appropriate adapter")
+}
+
+fn create_pbr_render_pipelines(
+	device: &wgpu::Device,
+	surface: &wgpu::Surface,
+	adapter: &wgpu::Adapter,
+	material_bind_group_layout: &wgpu::BindGroupLayout,
+	controller: &camera::CameraController,
+	lights: &light::Lights,
+) -> (wgpu::RenderPipeline, wgpu::RenderPipeline) {
+	let shader = device.create_shader_module(wgpu::include_wgsl!("../shaders/pbr.wgsl"));
+
+	let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+		label: None,
+		bind_group_layouts: &[
+			material_bind_group_layout,
+			&controller.camera.bind_group_layout,
+			&lights.bind_group_layout,
+		],
+		push_constant_ranges: &[],
+	});
+
+	let swapchain_capabilities = surface.get_capabilities(adapter);
+	let opaque_render_pipeline = create_render_pipeline(
+		device,
+		&pipeline_layout,
+		wgpu::ColorTargetState {
+			format: swapchain_capabilities.formats[0],
+			blend: None,
+			write_mask: wgpu::ColorWrites::ALL,
+		},
+		true,
+		&shader,
+	);
+
+	let transparent_render_pipeline = {
+		let transparent_target = wgpu::ColorTargetState {
+			format: swapchain_capabilities.formats[0],
+			blend: Some(wgpu::BlendState {
+				color: wgpu::BlendComponent {
+					src_factor: wgpu::BlendFactor::SrcAlpha,
+					dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+					operation: wgpu::BlendOperation::Add,
+				},
+				alpha: wgpu::BlendComponent {
+					src_factor: wgpu::BlendFactor::One,
+					dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+					operation: wgpu::BlendOperation::Add,
+				},
+			}),
+			write_mask: wgpu::ColorWrites::COLOR,
+		};
+
+		create_render_pipeline(device, &pipeline_layout, transparent_target, false, &shader)
+	};
+
+	(opaque_render_pipeline, transparent_render_pipeline)
+}
+
 impl State {
 	async fn new(window: Window) -> Self {
 		let window = Arc::new(window);
@@ -117,27 +200,8 @@ impl State {
 		let instance = wgpu::Instance::default();
 
 		let surface = instance.create_surface(window.clone()).unwrap();
-		let adapter = instance
-			.request_adapter(&wgpu::RequestAdapterOptions {
-				power_preference: wgpu::PowerPreference::default(),
-				force_fallback_adapter: false,
-				compatible_surface: Some(&surface),
-			})
-			.await
-			.expect("failed to find an appropriate adapter");
-
-		let (device, queue) = adapter
-			.request_device(
-				&wgpu::DeviceDescriptor {
-					label: None,
-					required_features: wgpu::Features::empty(),
-					required_limits: wgpu::Limits::downlevel_defaults()
-						.using_resolution(adapter.limits()),
-				},
-				None,
-			)
-			.await
-			.expect("Failed to create device");
+		let adapter = request_adapter(&instance, &surface).await;
+		let (device, queue) = request_device(&adapter).await;
 
 		let config = surface
 			.get_default_config(&adapter, size.width, size.height)
@@ -147,10 +211,7 @@ impl State {
 		let depth_texture =
 			texture::Texture::create_depth_texture(&device, &config, "depth_texture");
 
-		let shader = device.create_shader_module(wgpu::include_wgsl!("../shaders/shader.wgsl"));
-
 		let material_bind_group_layout = Material::create_bind_group_layout(&device);
-
 		let camera_builder = camera::CameraBuilder::new(config.width as f32, config.height as f32);
 		let camera = camera::Camera::new(&camera_builder).create_on_device(&device);
 		let controller = camera::CameraController::new(camera, camera_builder);
@@ -163,55 +224,14 @@ impl State {
 			&device,
 		);
 
-		let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-			label: None,
-			bind_group_layouts: &[
-				&material_bind_group_layout,
-				&controller.camera.bind_group_layout,
-				&lights.bind_group_layout,
-			],
-			push_constant_ranges: &[],
-		});
-
-		let swapchain_capabilities = surface.get_capabilities(&adapter);
-		let opaque_render_pipeline = create_render_pipeline(
+		let (opaque_render_pipeline, transparent_render_pipeline) = create_pbr_render_pipelines(
 			&device,
-			&pipeline_layout,
-			wgpu::ColorTargetState {
-				format: swapchain_capabilities.formats[0],
-				blend: None,
-				write_mask: wgpu::ColorWrites::ALL,
-			},
-			true,
-			&shader,
+			&surface,
+			&adapter,
+			&material_bind_group_layout,
+			&controller,
+			&lights,
 		);
-
-		let transparent_render_pipeline = {
-			let transparent_target = wgpu::ColorTargetState {
-				format: swapchain_capabilities.formats[0],
-				blend: Some(wgpu::BlendState {
-					color: wgpu::BlendComponent {
-						src_factor: wgpu::BlendFactor::SrcAlpha,
-						dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
-						operation: wgpu::BlendOperation::Add,
-					},
-					alpha: wgpu::BlendComponent {
-						src_factor: wgpu::BlendFactor::One,
-						dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
-						operation: wgpu::BlendOperation::Add,
-					},
-				}),
-				write_mask: wgpu::ColorWrites::COLOR,
-			};
-
-			create_render_pipeline(
-				&device,
-				&pipeline_layout,
-				transparent_target,
-				false,
-				&shader,
-			)
-		};
 
 		Self {
 			window,

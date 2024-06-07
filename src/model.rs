@@ -184,12 +184,13 @@ impl Model {
 		device: &wgpu::Device,
 		queue: &wgpu::Queue,
 		layout: &wgpu::BindGroupLayout,
+		cubemap: &texture::Texture,
 	) -> anyhow::Result<Self>
 	where
 		P: AsRef<Path> + fmt::Debug,
 	{
 		match path.as_ref().extension().and_then(|s| s.to_str()) {
-			Some("gltf") => Self::from_path_gltf(path, device, queue, layout).await,
+			Some("gltf") => Self::from_path_gltf(path, device, queue, layout, cubemap).await,
 			_ => Err(anyhow::anyhow!("unsupported model format")),
 		}
 	}
@@ -204,6 +205,7 @@ impl Model {
 		device: &wgpu::Device,
 		queue: &wgpu::Queue,
 		layout: &wgpu::BindGroupLayout,
+		cubemap: &texture::Texture,
 	) -> anyhow::Result<Self>
 	where
 		P: AsRef<Path> + fmt::Debug,
@@ -218,7 +220,7 @@ impl Model {
 
 		for material in gltf.materials() {
 			let material = texture::Material::from_gltf_material(device, queue, &material, root)?;
-			let bind_group = material.create_bind_group(device, layout);
+			let bind_group = material.create_bind_group(device, layout, cubemap);
 
 			materials.push(GpuMaterial {
 				material,

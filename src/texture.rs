@@ -342,7 +342,6 @@ pub struct Material {
 	pub metallic_roughness: Texture,
 	pub ao: Texture,
 
-	pub has_normal: bool,
 	pub transparent: bool,
 }
 
@@ -360,7 +359,6 @@ impl Material {
 			metallic_roughness,
 			ao,
 			transparent: false,
-			has_normal: false,
 		}
 	}
 
@@ -436,15 +434,20 @@ impl Material {
 					ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
 					count: None,
 				},
-				// has_normal (f32)
 				wgpu::BindGroupLayoutEntry {
 					binding: 8,
 					visibility: wgpu::ShaderStages::FRAGMENT,
-					ty: wgpu::BindingType::Buffer {
-						ty: wgpu::BufferBindingType::Uniform,
-						has_dynamic_offset: false,
-						min_binding_size: None,
+					ty: wgpu::BindingType::Texture {
+						sample_type: wgpu::TextureSampleType::Float { filterable: true },
+						multisampled: false,
+						view_dimension: wgpu::TextureViewDimension::Cube,
 					},
+					count: None,
+				},
+				wgpu::BindGroupLayoutEntry {
+					binding: 9,
+					visibility: wgpu::ShaderStages::FRAGMENT,
+					ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
 					count: None,
 				},
 			],
@@ -457,6 +460,7 @@ impl Material {
 		&self,
 		device: &wgpu::Device,
 		layout: &wgpu::BindGroupLayout,
+		cubemap: &Texture,
 	) -> wgpu::BindGroup {
 		device.create_bind_group(&wgpu::BindGroupDescriptor {
 			layout,
@@ -493,17 +497,14 @@ impl Material {
 					binding: 7,
 					resource: wgpu::BindingResource::Sampler(&self.ao.sampler),
 				},
+				// TODO: refactor this to the Model struct maybe?
 				wgpu::BindGroupEntry {
 					binding: 8,
-					resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-						buffer: &device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-							label: Some("material has_normal"),
-							contents: bytemuck::cast_slice(&[f32::from(self.has_normal)]),
-							usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-						}),
-						offset: 0,
-						size: None,
-					}),
+					resource: wgpu::BindingResource::TextureView(&cubemap.view),
+				},
+				wgpu::BindGroupEntry {
+					binding: 9,
+					resource: wgpu::BindingResource::Sampler(&cubemap.sampler),
 				},
 			],
 			label: None,
@@ -640,7 +641,6 @@ impl Material {
 			metallic_roughness: metallic_roughness_texture,
 			ao: ao_texture,
 			transparent: material.alpha_mode() == gltf::material::AlphaMode::Blend,
-			has_normal,
 		})
 	}
 }
