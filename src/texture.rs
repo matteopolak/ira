@@ -1,24 +1,67 @@
-use std::path::Path;
+use std::{borrow::Cow, num::NonZeroU32, path::Path};
 
 use anyhow::{anyhow, Ok, Result};
 use glam::{Vec2, Vec3};
-use image::{ColorType, GenericImageView, ImageDecoder};
+use image::{ColorType, GenericImageView, RgbaImage};
 use wgpu::util::DeviceExt;
 
 use crate::Vertex;
 
+#[must_use]
 #[derive(Debug)]
 pub struct Texture {
 	pub texture: wgpu::Texture,
 	pub view: wgpu::TextureView,
 	pub sampler: wgpu::Sampler,
-	pub image: Option<Image>,
-
-	pub tex_coord: Option<u32>,
 }
 
 impl Texture {
 	pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
+
+	pub fn create_multisampled(
+		device: &wgpu::Device,
+		config: &wgpu::SurfaceConfiguration,
+		sample_count: u32,
+	) -> Self {
+		let size = wgpu::Extent3d {
+			width: config.width,
+			height: config.height,
+			depth_or_array_layers: 1,
+		};
+		let desc = wgpu::TextureDescriptor {
+			label: None,
+			size,
+			mip_level_count: 1,
+			sample_count,
+			dimension: wgpu::TextureDimension::D2,
+			format: config.format,
+			usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+				| wgpu::TextureUsages::TEXTURE_BINDING
+				| wgpu::TextureUsages::COPY_SRC,
+			view_formats: &[config.format],
+		};
+		let texture = device.create_texture(&desc);
+
+		let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+		let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+			address_mode_u: wgpu::AddressMode::ClampToEdge,
+			address_mode_v: wgpu::AddressMode::ClampToEdge,
+			address_mode_w: wgpu::AddressMode::ClampToEdge,
+			mag_filter: wgpu::FilterMode::Linear,
+			min_filter: wgpu::FilterMode::Linear,
+			mipmap_filter: wgpu::FilterMode::Nearest,
+			compare: None,
+			lod_min_clamp: 0.0,
+			lod_max_clamp: 100.0,
+			..Default::default()
+		});
+
+		Self {
+			texture,
+			view,
+			sampler,
+		}
+	}
 
 	pub fn resize(&mut self, device: &wgpu::Device, width: u32, height: u32) {
 		let size = wgpu::Extent3d {
@@ -30,11 +73,11 @@ impl Texture {
 		self.texture = device.create_texture(&wgpu::TextureDescriptor {
 			label: None,
 			size,
-			mip_level_count: 1,
-			sample_count: 1,
-			dimension: wgpu::TextureDimension::D2,
+			mip_level_count: self.texture.mip_level_count(),
+			sample_count: self.texture.sample_count(),
+			dimension: self.texture.dimension(),
 			format: self.texture.format(),
-			usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+			usage: self.texture.usage(),
 			view_formats: &[],
 		});
 
@@ -43,10 +86,10 @@ impl Texture {
 			.create_view(&wgpu::TextureViewDescriptor::default());
 	}
 
-	#[must_use]
 	pub fn create_depth_texture(
 		device: &wgpu::Device,
 		config: &wgpu::SurfaceConfiguration,
+		sample_count: u32,
 		label: &str,
 	) -> Self {
 		let size = wgpu::Extent3d {
@@ -58,7 +101,7 @@ impl Texture {
 			label: Some(label),
 			size,
 			mip_level_count: 1,
-			sample_count: 1,
+			sample_count,
 			dimension: wgpu::TextureDimension::D2,
 			format: Self::DEPTH_FORMAT,
 			usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
@@ -84,129 +127,76 @@ impl Texture {
 			texture,
 			view,
 			sampler,
-			image: None,
-			tex_coord: None,
 		}
 	}
 
-	/// Creates a new texture from a solid colour.
-	#[must_use]
-	pub fn new_solid(device: &wgpu::Device, queue: &wgpu::Queue, rgba: [u8; 4]) -> Self {
-		let image = image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(
-			32,
-			32,
-			image::Rgba(rgba),
-		));
-
-		Self::from_image(device, queue, image.into(), Some("solid colour"))
-	}
-
-	#[must_use]
-	pub fn new_solid_f32(device: &wgpu::Device, queue: &wgpu::Queue, rgba: [f32; 4]) -> Self {
-		let rgba8 = [
-			(rgba[0] * 255.0) as u8,
-			(rgba[1] * 255.0) as u8,
-			(rgba[2] * 255.0) as u8,
-			(rgba[3] * 255.0) as u8,
-		];
-
-		Self::new_solid(device, queue, rgba8)
-	}
-
-	/// Creates a new texture from an image file.
-	///
-	/// # Errors
-	/// Returns an error if the image file cannot be read or is in an unsupported format.
-	pub fn try_from_path<P: AsRef<Path>>(
+	fn write_image_texture(
 		device: &wgpu::Device,
 		queue: &wgpu::Queue,
-		path: P,
-		label: &str,
-	) -> Result<Self> {
-		let image = image::open(path)?;
+		image: &Image,
+	) -> wgpu::Texture {
+		let is_cube = image.array_layers == 6;
+		let dimensions = if is_cube {
+			let side = image.dimensions.0 / if image.mip_levels.is_some() { 8 } else { 4 };
 
-		Ok(Self::from_image(device, queue, image.into(), Some(label)))
-	}
+			(side, side)
+		} else {
+			(image.dimensions.0, image.dimensions.1)
+		};
 
-	/// Creates a new texture from a byte slice.
-	///
-	/// The byte slice should contain RGBA8 image data, but other formats will be attempted.
-	///
-	/// # Errors
-	/// Returns an error if the byte slice cannot be converted into an image.
-	pub fn try_from_bytes<B>(
-		device: &wgpu::Device,
-		queue: &wgpu::Queue,
-		bytes: B,
-		label: Option<&str>,
-	) -> Result<Self>
-	where
-		B: AsRef<[u8]>,
-	{
-		let image = image::load_from_memory(bytes.as_ref())?;
+		let size = wgpu::Extent3d {
+			width: dimensions.0,
+			height: dimensions.1,
+			depth_or_array_layers: image.array_layers,
+		};
 
-		Ok(Self::from_image(device, queue, image.into(), label))
+		let buf = image.create_image_buffer();
+
+		device.create_texture_with_data(
+			queue,
+			&wgpu::TextureDescriptor {
+				label: None,
+				size,
+				mip_level_count: image.mip_levels.unwrap_or(1),
+				sample_count: 1,
+				dimension: wgpu::TextureDimension::D2,
+				format: match image.data {
+					ImageData::Rgba8(..) => wgpu::TextureFormat::Rgba8UnormSrgb,
+					ImageData::Rgba32F(..) => wgpu::TextureFormat::Rgba32Float,
+				},
+				usage: wgpu::TextureUsages::TEXTURE_BINDING
+					| wgpu::TextureUsages::COPY_DST
+					| wgpu::TextureUsages::RENDER_ATTACHMENT,
+				view_formats: &[],
+			},
+			wgpu::util::TextureDataOrder::MipMajor,
+			&buf,
+		)
 	}
 
 	/// Creates a new texture from an image.
 	///
 	/// # Panics
 	/// Panics if the image format is not `Rgba8`, `Rgba16`, or `Rgba32F`.
-	#[must_use]
-	pub fn from_image(
-		device: &wgpu::Device,
-		queue: &wgpu::Queue,
-		image: Image,
-		label: Option<&str>,
-	) -> Self {
-		let size = wgpu::Extent3d {
-			width: image.dimensions.0,
-			height: image.dimensions.1,
-			depth_or_array_layers: 1,
-		};
-		let texture = device.create_texture(&wgpu::TextureDescriptor {
-			label,
-			size,
-			mip_level_count: 1,
-			sample_count: 1,
-			dimension: wgpu::TextureDimension::D2,
-			format: match image.data {
-				ImageData::Rgba8(..) => wgpu::TextureFormat::Rgba8UnormSrgb,
-				ImageData::Rgba32F(..) => wgpu::TextureFormat::Rgba32Float,
-			},
-			usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-			view_formats: &[],
+	pub fn from_image(device: &wgpu::Device, queue: &wgpu::Queue, image: &Image) -> Self {
+		let texture = Self::write_image_texture(device, queue, image);
+
+		let view = texture.create_view(&wgpu::TextureViewDescriptor {
+			label: None,
+			dimension: Some(image.view_dimension),
+			mip_level_count: image.mip_levels,
+			..Default::default()
 		});
-
-		queue.write_texture(
-			wgpu::ImageCopyTexture {
-				aspect: wgpu::TextureAspect::All,
-				texture: &texture,
-				mip_level: 0,
-				origin: wgpu::Origin3d::ZERO,
-			},
-			image.data.as_ref(),
-			wgpu::ImageDataLayout {
-				offset: 0,
-				bytes_per_row: Some(
-					match image.data {
-						ImageData::Rgba8(..) => 4 * image.dimensions.0,
-						ImageData::Rgba32F(..) => 16 * image.dimensions.0,
-					} * image.dimensions.0,
-				),
-				rows_per_image: Some(image.dimensions.1),
-			},
-			size,
-		);
-
-		let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
 		let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
 			address_mode_u: wgpu::AddressMode::ClampToEdge,
 			address_mode_v: wgpu::AddressMode::ClampToEdge,
 			address_mode_w: wgpu::AddressMode::ClampToEdge,
 			mag_filter: wgpu::FilterMode::Linear,
-			min_filter: wgpu::FilterMode::Nearest,
-			mipmap_filter: wgpu::FilterMode::Nearest,
+			min_filter: wgpu::FilterMode::Linear,
+			mipmap_filter: wgpu::FilterMode::Linear,
+			lod_min_clamp: 0.0,
+			lod_max_clamp: image.mip_levels.unwrap_or(1) as f32,
+			anisotropy_clamp: 16,
 			..Default::default()
 		});
 
@@ -214,8 +204,6 @@ impl Texture {
 			texture,
 			view,
 			sampler,
-			image: Some(image),
-			tex_coord: None,
 		}
 	}
 
@@ -227,16 +215,16 @@ impl Texture {
 		device: &wgpu::Device,
 		queue: &wgpu::Queue,
 		path: P,
-		label: &str,
 	) -> Result<Self> {
 		let image = image::open(path)?.into_rgba32f();
 		let dimensions = image.dimensions();
 		let image = Image {
-			data: ImageData::Rgba32F(image.into_raw()),
+			data: ImageData::Rgba32F(image),
 			dimensions,
+			..Default::default()
 		};
 
-		Ok(Self::from_image(device, queue, image, Some(label)))
+		Ok(Self::from_image(device, queue, &image))
 	}
 }
 
@@ -244,12 +232,27 @@ impl Texture {
 pub struct Image {
 	pub data: ImageData,
 	pub dimensions: (u32, u32),
+	pub view_dimension: wgpu::TextureViewDimension,
+	pub mip_levels: Option<u32>,
+	pub array_layers: u32,
+}
+
+impl Default for Image {
+	fn default() -> Self {
+		Self {
+			data: ImageData::Rgba8(image::RgbaImage::new(0, 0)),
+			dimensions: (0, 0),
+			view_dimension: wgpu::TextureViewDimension::D2,
+			mip_levels: None,
+			array_layers: 1,
+		}
+	}
 }
 
 #[derive(Debug)]
 pub enum ImageData {
-	Rgba8(Vec<u8>),
-	Rgba32F(Vec<f32>),
+	Rgba8(image::RgbaImage),
+	Rgba32F(image::Rgba32FImage),
 }
 
 impl AsRef<[u8]> for ImageData {
@@ -275,12 +278,141 @@ impl Image {
 	}
 
 	#[must_use]
+	pub fn mip_size(&self, mip: u32) -> (u32, u32) {
+		let (width, height) = self.dimensions;
+
+		((width >> mip).max(1), (height >> mip).max(1))
+	}
+
+	#[must_use]
+	pub fn mip_data(&self, mip: u32, layer: u32, layers: u32) -> Cow<[u8]> {
+		let ImageData::Rgba8(data) = &self.data else {
+			return Cow::Borrowed(&[]);
+		};
+
+		// width and height of the texture
+		let (width, height) = self.mip_size(mip);
+
+		// for no layers, return it all
+		if layer == 0 && layers == 1 {
+			Cow::Borrowed(data)
+		} else {
+			// for more than 1 layer, assume cubemap
+			// the faces are layed out like
+			//
+			//    +Y
+			// -X +Z +X -Z
+			//    -Y
+			//
+			// order:
+			// +X, -X, +Y, -Y, +Z, -Z
+			const TOP_LEFT: [(u32, u32); 6] = [
+				(2, 1), // +X
+				(0, 1), // -X
+				(1, 0), // +Y
+				(1, 2), // -Y
+				(1, 1), // +Z
+				(3, 1), // -Z
+			];
+
+			// we need to offset the X by the previous mip levels
+			// we know the aspect ratio is 4:3 (4 squares across, 3 up)
+			// so we can simply get mip_0 width with height / 3 * 4, then
+			// keep adding that divided by 2 until we reach this mip level
+			// using the geometric sum of mip * (1 + 1/2 + 1/4 + ...)
+
+			let a = (self.mip_size(0).1 / 3 * 4) as f32;
+			let r: f32 = 1.0 / 2.0;
+			let offset_x = (a * (1.0 - r.powi(mip as i32)) / (1.0 - r)) as u32;
+
+			let side = height / 3;
+			let (width, height) = (side, side);
+
+			let (x, y) = TOP_LEFT[layer as usize];
+			let data = data
+				.view(offset_x + x * width, y * height, width, height)
+				.to_image()
+				.to_vec();
+
+			Cow::Owned(data)
+		}
+	}
+
+	/// Creates a packed image buffer of all mip levels and cube faces.
+	#[must_use]
+	pub fn create_image_buffer(&self) -> Vec<u8> {
+		let mip_levels = self.mip_levels.unwrap_or(1);
+
+		// 4 options:
+		// - 1 mip level, 1 face
+		// - 1 mip level, 6 faces
+		// - n mip levels, 1 face
+		// - n mip levels, 6 faces
+
+		let mut buf = Vec::new();
+
+		for mip in 0..mip_levels {
+			for layer in 0..self.array_layers {
+				let data = self.mip_data(mip, layer, self.array_layers);
+
+				buf.extend_from_slice(data.as_ref());
+			}
+		}
+
+		buf
+	}
+
+	pub fn to_texture(&self, device: &wgpu::Device, queue: &wgpu::Queue) -> Texture {
+		Texture::from_image(device, queue, self)
+	}
+
+	#[must_use]
 	pub fn is_transparent(&self) -> bool {
 		let ImageData::Rgba8(data) = &self.data else {
 			return false;
 		};
 
 		data.chunks_exact(4).any(|pixel| pixel[3] < 255)
+	}
+
+	/// Creates a new texture from a solid colour.
+	#[must_use]
+	pub fn new_solid(rgba: [u8; 4]) -> Self {
+		image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(32, 32, image::Rgba(rgba)))
+			.into()
+	}
+
+	#[must_use]
+	pub fn new_solid_f32(rgba: [f32; 4]) -> Self {
+		let rgba8 = [
+			(rgba[0] * 255.0) as u8,
+			(rgba[1] * 255.0) as u8,
+			(rgba[2] * 255.0) as u8,
+			(rgba[3] * 255.0) as u8,
+		];
+
+		Self::new_solid(rgba8)
+	}
+
+	/// Creates a new texture from an image file.
+	///
+	/// # Errors
+	/// Returns an error if the image file cannot be read or is in an unsupported format.
+	pub fn try_from_path<P: AsRef<Path>>(path: P) -> Result<Self> {
+		Ok(image::open(path)?.into())
+	}
+
+	/// Creates a new texture from a byte slice.
+	///
+	/// The byte slice should contain RGBA8 image data, but other formats will be attempted.
+	///
+	/// # Errors
+	/// Returns an error if the byte slice cannot be converted into an image.
+	pub fn try_from_bytes<B>(bytes: B) -> Result<Self>
+	where
+		B: AsRef<[u8]>,
+	{
+		Ok(image::load_from_memory(bytes.as_ref())?.into())
 	}
 }
 
@@ -290,15 +422,17 @@ impl From<image::DynamicImage> for Image {
 		// keep RGBA32F, convert RGB32F to RGBA32F
 		// everything else, convert to RGBA8
 		let data = match image {
-			image::DynamicImage::ImageRgba8(img) => ImageData::Rgba8(img.into_raw()),
-			img @ image::DynamicImage::ImageRgb32F(..) => {
-				ImageData::Rgba32F(img.into_rgba32f().into_raw())
-			}
-			image::DynamicImage::ImageRgba32F(img) => ImageData::Rgba32F(img.into_raw()),
-			other => ImageData::Rgba8(other.into_rgba8().into_raw()),
+			image::DynamicImage::ImageRgba8(img) => ImageData::Rgba8(img),
+			img @ image::DynamicImage::ImageRgb32F(..) => ImageData::Rgba32F(img.into_rgba32f()),
+			image::DynamicImage::ImageRgba32F(img) => ImageData::Rgba32F(img),
+			other => ImageData::Rgba8(other.into_rgba8()),
 		};
 
-		Self { data, dimensions }
+		Self {
+			data,
+			dimensions,
+			..Default::default()
+		}
 	}
 }
 
@@ -329,8 +463,9 @@ impl TryFrom<gltf::image::Data> for Image {
 		};
 
 		Ok(Self {
-			data: ImageData::Rgba8(image.into_rgba8().into_raw()),
+			data: ImageData::Rgba8(image.into_rgba8()),
 			dimensions,
+			..Default::default()
 		})
 	}
 }
@@ -348,10 +483,10 @@ pub struct Material {
 impl Material {
 	#[must_use]
 	pub fn default(device: &wgpu::Device, queue: &wgpu::Queue) -> Self {
-		let diffuse = Texture::new_solid(device, queue, [u8::MAX; 4]);
-		let normal = Texture::new_solid(device, queue, [128, 128, 255, 255]);
-		let metallic_roughness = Texture::new_solid(device, queue, [0, 0, 0, 255]);
-		let ao = Texture::new_solid(device, queue, [u8::MAX; 4]);
+		let diffuse = Image::new_solid([u8::MAX; 4]).to_texture(device, queue);
+		let normal = Image::new_solid([128, 128, 255, 255]).to_texture(device, queue);
+		let metallic_roughness = Image::new_solid([0, 0, 0, 255]).to_texture(device, queue);
+		let ao = Image::new_solid([u8::MAX; 4]).to_texture(device, queue);
 
 		Self {
 			diffuse,
@@ -434,22 +569,6 @@ impl Material {
 					ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
 					count: None,
 				},
-				wgpu::BindGroupLayoutEntry {
-					binding: 8,
-					visibility: wgpu::ShaderStages::FRAGMENT,
-					ty: wgpu::BindingType::Texture {
-						sample_type: wgpu::TextureSampleType::Float { filterable: true },
-						multisampled: false,
-						view_dimension: wgpu::TextureViewDimension::Cube,
-					},
-					count: None,
-				},
-				wgpu::BindGroupLayoutEntry {
-					binding: 9,
-					visibility: wgpu::ShaderStages::FRAGMENT,
-					ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-					count: None,
-				},
 			],
 			label: Some("texture_bind_group_layout"),
 		})
@@ -460,7 +579,6 @@ impl Material {
 		&self,
 		device: &wgpu::Device,
 		layout: &wgpu::BindGroupLayout,
-		cubemap: &Texture,
 	) -> wgpu::BindGroup {
 		device.create_bind_group(&wgpu::BindGroupDescriptor {
 			layout,
@@ -497,15 +615,6 @@ impl Material {
 					binding: 7,
 					resource: wgpu::BindingResource::Sampler(&self.ao.sampler),
 				},
-				// TODO: refactor this to the Model struct maybe?
-				wgpu::BindGroupEntry {
-					binding: 8,
-					resource: wgpu::BindingResource::TextureView(&cubemap.view),
-				},
-				wgpu::BindGroupEntry {
-					binding: 9,
-					resource: wgpu::BindingResource::Sampler(&cubemap.sampler),
-				},
 			],
 			label: None,
 		})
@@ -517,7 +626,7 @@ impl Material {
 		let image =
 			image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(1, 1, image::Rgba(rgba)));
 
-		let diffuse = Texture::from_image(device, queue, image.into(), Some("solid colour"));
+		let diffuse = Texture::from_image(device, queue, &image.into());
 
 		Self {
 			diffuse,
@@ -566,13 +675,13 @@ impl Material {
 
 		let diffuse_colour = material.pbr_metallic_roughness().base_color_factor();
 		let diffuse_texture = diffuse_texture.map_or_else(
-			|| Ok(Texture::new_solid_f32(device, queue, diffuse_colour)),
+			|| Ok(Image::new_solid_f32(diffuse_colour).to_texture(device, queue)),
 			|t| {
 				Image::try_from(t).map(|mut i| {
 					// multiply alpha by colour
 					i.blend(diffuse_colour);
 
-					Texture::from_image(device, queue, i, Some("diffuse texture"))
+					Texture::from_image(device, queue, &i)
 				})
 			},
 		)?;
@@ -582,21 +691,9 @@ impl Material {
 			.map(|t| t.texture().source())
 			.map(|s| gltf::image::Data::from_source(s.source(), Some(root), &[]))
 			.transpose()?;
-		let (has_normal, normal_texture) = normal_texture.map_or_else(
-			|| {
-				Ok((
-					false,
-					Texture::new_solid(device, queue, [128, 128, 255, 255]),
-				))
-			},
-			|t| {
-				Image::try_from(t).map(|i| {
-					(
-						true,
-						Texture::from_image(device, queue, i, Some("normal map")),
-					)
-				})
-			},
+		let normal_texture = normal_texture.map_or_else(
+			|| Ok(Image::new_solid([128, 128, 255, 255]).to_texture(device, queue)),
+			|t| Image::try_from(t).map(|i| Texture::from_image(device, queue, &i)),
 		)?;
 
 		let metallic_roughness = material.pbr_metallic_roughness();
@@ -610,16 +707,12 @@ impl Material {
 			.transpose()?;
 		let metallic_roughness_texture = metallic_roughness_texture.map_or_else(
 			|| {
-				Ok(Texture::new_solid_f32(
-					device,
-					queue,
-					[0.0, roughness_factor, metallic_factor, 1.0],
-				))
+				Ok(
+					Image::new_solid_f32([0.0, roughness_factor, metallic_factor, 1.0])
+						.to_texture(device, queue),
+				)
 			},
-			|t| {
-				Image::try_from(t)
-					.map(|i| Texture::from_image(device, queue, i, Some("metallic roughness map")))
-			},
+			|t| Image::try_from(t).map(|i| Texture::from_image(device, queue, &i)),
 		)?;
 
 		let ao_texture = material
@@ -628,11 +721,8 @@ impl Material {
 			.map(|s| gltf::image::Data::from_source(s.source(), Some(root), &[]))
 			.transpose()?;
 		let ao_texture = ao_texture.map_or_else(
-			|| Ok(Texture::new_solid(device, queue, [255; 4])),
-			|t| {
-				Image::try_from(t)
-					.map(|i| Texture::from_image(device, queue, i, Some("ambient occlusion map")))
-			},
+			|| Ok(Image::new_solid([255; 4]).to_texture(device, queue)),
+			|t| Image::try_from(t).map(|i| Texture::from_image(device, queue, &i)),
 		)?;
 
 		Ok(Self {

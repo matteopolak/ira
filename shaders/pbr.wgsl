@@ -92,8 +92,14 @@ fn vs_main(model: VertexInput, instance: InstanceInput) -> VertexOutput {
 @group(0) @binding(6) var t_ao: texture_2d<f32>;
 @group(0) @binding(7) var s_ao: sampler;
 
-@group(3) @binding(0) var<uniform> t_irradiance: texture_cube<f32>;
-@group(3) @binding(1) var<uniform> s_irradiance: sampler;
+@group(3) @binding(0) var t_brdf_lut: texture_2d<f32>;
+@group(3) @binding(1) var s_brdf_lut: sampler;
+
+@group(3) @binding(2) var t_prefilter: texture_cube<f32>;
+@group(3) @binding(3) var s_prefilter: sampler;
+
+@group(3) @binding(4) var t_irradiance: texture_cube<f32>;
+@group(3) @binding(5) var s_irradiance: sampler;
 
 const pi = radians(180.0);
 
@@ -120,40 +126,23 @@ fn fresnel_schlick(cos_theta: f32, f0: vec3<f32>) -> vec3<f32> {
 	return f0 + (vec3<f32>(1.0) - f0) * pow(clamp(1.0 - cos_theta, 0.0, 1.0), 5.0);
 }
 
-fn fresnel_schlick_roughness(cos_theta: f32, f0: vec3<f32>, roughness: f32) -> f32 {
+fn fresnel_schlick_roughness(cos_theta: f32, f0: vec3<f32>, roughness: f32) -> vec3<f32> {
 	return f0 + (max(vec3<f32>(1.0 - roughness), f0) - f0) * pow(clamp(1.0 - cos_theta, 0.0, 1.0), 5.0);
 }
 
-fn distribution_ggx(xi: vec2<f32>, n: vec3<f32>, roughness: f32) -> f32 {
+fn distribution_ggx(n: vec3<f32>, h: vec3<f32>, roughness: f32) -> f32 {
 	let a = roughness * roughness;
+	let a2 = a * a;
+	let n_dot_h = max(dot(n, h), 0.0);
+	let n_dot_h2 = n_dot_h * n_dot_h;
 
-	let phi = 2.0 * pi * xi.x;
-	let cos_theta = sqrt((1.0 - xi.y) / (1.0 + (a * a - 1.0) * xi.y));
-	let sin_theta = sqrt(1.0 - cos_theta * cos_theta);
+	let numerator = a2;
+	let denominator = (n_dot_h2 * (a2 - 1.0) + 1.0);
 
-	let h = vec3<f32>(
-		sin_theta * cos(phi),
-		sin_theta * sin(phi),
-		cos_theta,
-	);
-
-	// https://learnopengl.com/PBR/IBL/Specular-IBL
+	return numerator / (pi * denominator * denominator);
 }
 
-fn radical_inverse_vdc(bits: u32) -> f32 {
-	var bits = (bits << 16) | (bits >> 16);
-
-	bits = ((bits & 0x55555555) << 1) | ((bits & 0xAAAAAAAA) >> 1);
-	bits = ((bits & 0x33333333) << 2) | ((bits & 0xCCCCCCCC) >> 2);
-	bits = ((bits & 0x0F0F0F0F) << 4) | ((bits & 0xF0F0F0F0) >> 4);
-	bits = ((bits & 0x00FF00FF) << 8) | ((bits & 0xFF00FF00) >> 8);
-
-	return f32(bits) * 2.3283064365386963e-10;
-}
-
-fn hammersley(i: u32, n: u32) -> vec2<f32> {
-	return vec2<f32>(f32(i) / f32(n), radical_inverse_vdc(i));
-}
+const max_reflection_lod = 4.0;
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
@@ -206,12 +195,19 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 		lo += (diffuse + specular) * radiance * n_dot_l;
 	}
 
-	let k_s = fresnel_schlick_roughness(max(dot(n, v), 0.0), f0, roughness);
-	let k_d = vec3<f32>(1.0) - k_s;
-	let irradiance = textureSample(t_irradiance, s_irradiance, n);
-	let diffuse = irradiance * albedo;
-	let ambient = (k_d * diffuse) * ao;
+	let f = fresnel_schlick_roughness(max(dot(n, v), 0.0), f0, roughness);
 
+	let k_s = f;
+	let k_d = vec3<f32>(1.0) - k_s;
+	let irradiance = textureSample(t_irradiance, s_irradiance, n).rgb;
+	let diffuse = irradiance * albedo;
+
+	let r = reflect(-v, n);
+	let prefiltered_color = textureSampleLevel(t_prefilter, s_prefilter, r, roughness * max_reflection_lod).rgb;
+	let env_brdf = textureSample(t_brdf_lut, s_brdf_lut, vec2<f32>(max(dot(n, v), 0.0), roughness)).rg;
+	let specular = prefiltered_color * (f * env_brdf.x + env_brdf.y);
+
+	let ambient = (k_d * diffuse + specular) * ao;
 	var color = ambient + lo;
 
 	// tone mapping

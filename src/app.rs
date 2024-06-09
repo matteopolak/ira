@@ -47,6 +47,7 @@ fn create_render_pipeline(
 	target: wgpu::ColorTargetState,
 	depth_write_enabled: bool,
 	shader: &wgpu::ShaderModule,
+	sample_count: u32,
 ) -> wgpu::RenderPipeline {
 	device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
 		label: None,
@@ -80,9 +81,8 @@ fn create_render_pipeline(
 			bias: wgpu::DepthBiasState::default(),
 		}),
 		multisample: wgpu::MultisampleState {
-			count: 1,
-			mask: !0,
-			alpha_to_coverage_enabled: false,
+			count: sample_count,
+			..Default::default()
 		},
 		multiview: None,
 	})
@@ -96,6 +96,7 @@ pub struct State {
 	pub config: wgpu::SurfaceConfiguration,
 
 	pub material_bind_group_layout: wgpu::BindGroupLayout,
+	pub brdf_bind_group: wgpu::BindGroup,
 
 	opaque_render_pipeline: wgpu::RenderPipeline,
 	transparent_render_pipeline: wgpu::RenderPipeline,
@@ -108,6 +109,9 @@ pub struct State {
 	lights: light::Lights,
 
 	last_frame: time::Instant,
+	pub sample_count: u32,
+
+	multisampled_texture: texture::Texture,
 }
 
 async fn request_device(adapter: &wgpu::Adapter) -> (wgpu::Device, wgpu::Queue) {
@@ -115,7 +119,7 @@ async fn request_device(adapter: &wgpu::Adapter) -> (wgpu::Device, wgpu::Queue) 
 		.request_device(
 			&wgpu::DeviceDescriptor {
 				label: None,
-				required_features: wgpu::Features::empty(),
+				required_features: wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES,
 				required_limits: wgpu::Limits::downlevel_defaults()
 					.using_resolution(adapter.limits()),
 			},
@@ -141,8 +145,10 @@ fn create_pbr_render_pipelines(
 	surface: &wgpu::Surface,
 	adapter: &wgpu::Adapter,
 	material_bind_group_layout: &wgpu::BindGroupLayout,
+	brdf_bind_group_layout: &wgpu::BindGroupLayout,
 	controller: &camera::CameraController,
 	lights: &light::Lights,
+	sample_count: u32,
 ) -> (wgpu::RenderPipeline, wgpu::RenderPipeline) {
 	let shader = device.create_shader_module(wgpu::include_wgsl!("../shaders/pbr.wgsl"));
 
@@ -152,6 +158,7 @@ fn create_pbr_render_pipelines(
 			material_bind_group_layout,
 			&controller.camera.bind_group_layout,
 			&lights.bind_group_layout,
+			brdf_bind_group_layout,
 		],
 		push_constant_ranges: &[],
 	});
@@ -167,6 +174,7 @@ fn create_pbr_render_pipelines(
 		},
 		true,
 		&shader,
+		sample_count,
 	);
 
 	let transparent_render_pipeline = {
@@ -187,10 +195,125 @@ fn create_pbr_render_pipelines(
 			write_mask: wgpu::ColorWrites::COLOR,
 		};
 
-		create_render_pipeline(device, &pipeline_layout, transparent_target, false, &shader)
+		create_render_pipeline(
+			device,
+			&pipeline_layout,
+			transparent_target,
+			false,
+			&shader,
+			sample_count,
+		)
 	};
 
 	(opaque_render_pipeline, transparent_render_pipeline)
+}
+
+fn create_brdf_bind_group(
+	device: &wgpu::Device,
+	queue: &wgpu::Queue,
+) -> anyhow::Result<(wgpu::BindGroup, wgpu::BindGroupLayout)> {
+	let ibl_brdf_lut =
+		texture::Image::try_from_path("./ibl_brdf_lut.png")?.to_texture(device, queue);
+	// 5 mip levels
+	let mut ibl_prefilter_map = texture::Image::try_from_path("./ibl_prefilter_map.png")?;
+	ibl_prefilter_map.view_dimension = wgpu::TextureViewDimension::Cube;
+	ibl_prefilter_map.mip_levels = Some(5);
+	ibl_prefilter_map.array_layers = 6;
+
+	let ibl_prefilter_map = ibl_prefilter_map.to_texture(device, queue);
+
+	// cubemap
+	let mut irradiance_map = texture::Image::try_from_path("./yokohama.jpg")?;
+	irradiance_map.view_dimension = wgpu::TextureViewDimension::Cube;
+	irradiance_map.array_layers = 6;
+	let irradiance_map = irradiance_map.to_texture(device, queue);
+
+	let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+		label: None,
+		entries: &[
+			wgpu::BindGroupLayoutEntry {
+				binding: 0,
+				visibility: wgpu::ShaderStages::FRAGMENT,
+				ty: wgpu::BindingType::Texture {
+					sample_type: wgpu::TextureSampleType::Float { filterable: true },
+					multisampled: false,
+					view_dimension: wgpu::TextureViewDimension::D2,
+				},
+				count: None,
+			},
+			wgpu::BindGroupLayoutEntry {
+				binding: 1,
+				visibility: wgpu::ShaderStages::FRAGMENT,
+				ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+				count: None,
+			},
+			wgpu::BindGroupLayoutEntry {
+				binding: 2,
+				visibility: wgpu::ShaderStages::FRAGMENT,
+				ty: wgpu::BindingType::Texture {
+					sample_type: wgpu::TextureSampleType::Float { filterable: true },
+					multisampled: false,
+					view_dimension: wgpu::TextureViewDimension::Cube,
+				},
+				count: None,
+			},
+			wgpu::BindGroupLayoutEntry {
+				binding: 3,
+				visibility: wgpu::ShaderStages::FRAGMENT,
+				ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+				count: None,
+			},
+			wgpu::BindGroupLayoutEntry {
+				binding: 4,
+				visibility: wgpu::ShaderStages::FRAGMENT,
+				ty: wgpu::BindingType::Texture {
+					sample_type: wgpu::TextureSampleType::Float { filterable: true },
+					multisampled: false,
+					view_dimension: wgpu::TextureViewDimension::Cube,
+				},
+				count: None,
+			},
+			wgpu::BindGroupLayoutEntry {
+				binding: 5,
+				visibility: wgpu::ShaderStages::FRAGMENT,
+				ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+				count: None,
+			},
+		],
+	});
+
+	let brdf_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+		label: None,
+		layout: &layout,
+		entries: &[
+			wgpu::BindGroupEntry {
+				binding: 0,
+				resource: wgpu::BindingResource::TextureView(&ibl_brdf_lut.view),
+			},
+			wgpu::BindGroupEntry {
+				binding: 1,
+				resource: wgpu::BindingResource::Sampler(&ibl_brdf_lut.sampler),
+			},
+			wgpu::BindGroupEntry {
+				binding: 2,
+				resource: wgpu::BindingResource::TextureView(&ibl_prefilter_map.view),
+			},
+			wgpu::BindGroupEntry {
+				binding: 3,
+				resource: wgpu::BindingResource::Sampler(&ibl_prefilter_map.sampler),
+			},
+			wgpu::BindGroupEntry {
+				binding: 4,
+				resource: wgpu::BindingResource::TextureView(&irradiance_map.view),
+			},
+			wgpu::BindGroupEntry {
+				binding: 5,
+				resource: wgpu::BindingResource::Sampler(&irradiance_map.sampler),
+			},
+		],
+	});
+
+	Ok((brdf_bind_group, layout))
 }
 
 impl State {
@@ -201,20 +324,47 @@ impl State {
 
 		let surface = instance.create_surface(window.clone()).unwrap();
 		let adapter = request_adapter(&instance, &surface).await;
+
 		let (device, queue) = request_device(&adapter).await;
 
-		let config = surface
-			.get_default_config(&adapter, size.width, size.height)
-			.unwrap();
+		let config = wgpu::SurfaceConfiguration {
+			usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+			format: wgpu::TextureFormat::Bgra8UnormSrgb,
+			width: size.width,
+			height: size.height,
+			desired_maximum_frame_latency: 2,
+			present_mode: wgpu::PresentMode::Fifo,
+			alpha_mode: wgpu::CompositeAlphaMode::Auto,
+			view_formats: vec![],
+		};
+
 		surface.configure(&device, &config);
 
+		let sample_flags = adapter.get_texture_format_features(config.format).flags;
+
+		let sample_count = {
+			if sample_flags.contains(wgpu::TextureFormatFeatureFlags::MULTISAMPLE_X16) {
+				16
+			} else if sample_flags.contains(wgpu::TextureFormatFeatureFlags::MULTISAMPLE_X8) {
+				8
+			} else if sample_flags.contains(wgpu::TextureFormatFeatureFlags::MULTISAMPLE_X4) {
+				4
+			} else if sample_flags.contains(wgpu::TextureFormatFeatureFlags::MULTISAMPLE_X2) {
+				2
+			} else {
+				1
+			}
+		};
+
 		let depth_texture =
-			texture::Texture::create_depth_texture(&device, &config, "depth_texture");
+			texture::Texture::create_depth_texture(&device, &config, sample_count, "depth_texture");
 
 		let material_bind_group_layout = Material::create_bind_group_layout(&device);
 		let camera_builder = camera::CameraBuilder::new(config.width as f32, config.height as f32);
 		let camera = camera::Camera::new(&camera_builder).create_on_device(&device);
 		let controller = camera::CameraController::new(camera, camera_builder);
+		let (brdf_bind_group, brdf_bind_group_layout) =
+			create_brdf_bind_group(&device, &queue).unwrap();
 
 		let lights = light::Lights::from_lights(
 			&[
@@ -229,9 +379,14 @@ impl State {
 			&surface,
 			&adapter,
 			&material_bind_group_layout,
+			&brdf_bind_group_layout,
 			&controller,
 			&lights,
+			sample_count,
 		);
+
+		let multisampled_texture =
+			texture::Texture::create_multisampled(&device, &config, sample_count);
 
 		Self {
 			window,
@@ -245,6 +400,8 @@ impl State {
 
 			material_bind_group_layout,
 
+			brdf_bind_group,
+
 			controller,
 			depth_texture,
 
@@ -252,6 +409,9 @@ impl State {
 			lights,
 
 			last_frame: time::Instant::now(),
+			sample_count,
+
+			multisampled_texture,
 		}
 	}
 
@@ -264,6 +424,8 @@ impl State {
 			.projection
 			.resize(self.config.width as f32, self.config.height as f32);
 		self.depth_texture
+			.resize(&self.device, self.config.width, self.config.height);
+		self.multisampled_texture
 			.resize(&self.device, self.config.width, self.config.height);
 
 		self.surface.configure(&self.device, &self.config);
@@ -279,17 +441,21 @@ impl State {
 
 	fn render(&self) -> Result<(), wgpu::SurfaceError> {
 		let frame = self.surface.get_current_texture()?;
-		let view = frame
-			.texture
-			.create_view(&wgpu::TextureViewDescriptor::default());
 		let mut encoder = self
 			.device
 			.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+		let view = if self.sample_count > 1 {
+			&self.multisampled_texture.view
+		} else {
+			&frame
+				.texture
+				.create_view(&wgpu::TextureViewDescriptor::default())
+		};
 
 		let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
 			label: None,
 			color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-				view: &view,
+				view,
 				resolve_target: None,
 				ops: wgpu::Operations {
 					load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
@@ -315,6 +481,7 @@ impl State {
 				model,
 				&self.controller.camera.bind_group,
 				&self.lights.bind_group,
+				&self.brdf_bind_group,
 				false,
 			);
 		}
@@ -324,7 +491,7 @@ impl State {
 		let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
 			label: None,
 			color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-				view: &view,
+				view,
 				resolve_target: None,
 				ops: wgpu::Operations {
 					load: wgpu::LoadOp::Load,
@@ -350,11 +517,34 @@ impl State {
 				model,
 				&self.controller.camera.bind_group,
 				&self.lights.bind_group,
+				&self.brdf_bind_group,
 				true,
 			);
 		}
 
 		drop(rpass);
+
+		if self.sample_count > 1 {
+			let frame_view = frame
+				.texture
+				.create_view(&wgpu::TextureViewDescriptor::default());
+
+			// copy MSAA texture to frame view
+			encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+				label: None,
+				color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+					view,
+					resolve_target: Some(&frame_view),
+					ops: wgpu::Operations {
+						load: wgpu::LoadOp::Load,
+						store: wgpu::StoreOp::Store,
+					},
+				})],
+				depth_stencil_attachment: None,
+				timestamp_writes: None,
+				occlusion_query_set: None,
+			});
+		}
 
 		self.queue.submit(Some(encoder.finish()));
 		frame.present();

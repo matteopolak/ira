@@ -184,13 +184,12 @@ impl Model {
 		device: &wgpu::Device,
 		queue: &wgpu::Queue,
 		layout: &wgpu::BindGroupLayout,
-		cubemap: &texture::Texture,
 	) -> anyhow::Result<Self>
 	where
 		P: AsRef<Path> + fmt::Debug,
 	{
 		match path.as_ref().extension().and_then(|s| s.to_str()) {
-			Some("gltf") => Self::from_path_gltf(path, device, queue, layout, cubemap).await,
+			Some("gltf") => Self::from_path_gltf(path, device, queue, layout).await,
 			_ => Err(anyhow::anyhow!("unsupported model format")),
 		}
 	}
@@ -205,7 +204,6 @@ impl Model {
 		device: &wgpu::Device,
 		queue: &wgpu::Queue,
 		layout: &wgpu::BindGroupLayout,
-		cubemap: &texture::Texture,
 	) -> anyhow::Result<Self>
 	where
 		P: AsRef<Path> + fmt::Debug,
@@ -220,7 +218,7 @@ impl Model {
 
 		for material in gltf.materials() {
 			let material = texture::Material::from_gltf_material(device, queue, &material, root)?;
-			let bind_group = material.create_bind_group(device, layout, cubemap);
+			let bind_group = material.create_bind_group(device, layout);
 
 			materials.push(GpuMaterial {
 				material,
@@ -345,6 +343,7 @@ pub trait DrawModel<'a> {
 		instances: Range<u32>,
 		camera_bind_group: &'a wgpu::BindGroup,
 		light_bind_group: &'a wgpu::BindGroup,
+		brdf_bind_group: &'a wgpu::BindGroup,
 	);
 
 	fn draw_model_instanced(
@@ -352,6 +351,7 @@ pub trait DrawModel<'a> {
 		gpu_model: &'a GpuModel,
 		camera_bind_group: &'a wgpu::BindGroup,
 		light_bind_group: &'a wgpu::BindGroup,
+		brdf_bind_group: &'a wgpu::BindGroup,
 		transparent: bool,
 	);
 }
@@ -367,12 +367,14 @@ where
 		instances: Range<u32>,
 		camera_bind_group: &'b wgpu::BindGroup,
 		light_bind_group: &'b wgpu::BindGroup,
+		brdf_bind_group: &'b wgpu::BindGroup,
 	) {
 		self.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
 		self.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
 		self.set_bind_group(0, &material.bind_group, &[]);
 		self.set_bind_group(1, camera_bind_group, &[]);
 		self.set_bind_group(2, light_bind_group, &[]);
+		self.set_bind_group(3, brdf_bind_group, &[]);
 		self.draw_indexed(0..mesh.num_elements, 0, instances);
 	}
 
@@ -381,6 +383,7 @@ where
 		gpu_model: &'b GpuModel,
 		camera_bind_group: &'b wgpu::BindGroup,
 		light_bind_group: &'b wgpu::BindGroup,
+		brdf_bind_group: &'b wgpu::BindGroup,
 		transparent: bool,
 	) {
 		let model = &gpu_model.model;
@@ -402,6 +405,7 @@ where
 				0..model.instances.len() as u32,
 				camera_bind_group,
 				light_bind_group,
+				brdf_bind_group,
 			);
 		}
 	}
