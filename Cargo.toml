@@ -1,3 +1,6 @@
+[workspace]
+members = [".", "ira_drum"]
+
 [package]
 name = "ira"
 version = "0.0.3"

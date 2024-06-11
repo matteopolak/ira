@@ -1,0 +1,29 @@
+[package]
+name = "ira_drum"
+version = "0.1.0"
+edition = "2021"
+description = "A packaging format for textures and models."
+
+[dependencies]
+bincode = "2.0.0-rc.3"
+image = "0.25"
+image_dds = "0.5.1"
+
+[dependencies.bytemuck]
+version = "1"
+features = ["derive"]
+optional = true
+
+[dependencies.gltf]
+version = "1"
+optional = true
+
+[dependencies.wgpu]
+version = "0.20"
+optional = true
+
+[features]
+default = ["wgpu", "bytemuck", "gltf"]
+wgpu = ["dep:wgpu"]
+bytemuck = ["dep:bytemuck"]
+gltf = ["dep:gltf"]
