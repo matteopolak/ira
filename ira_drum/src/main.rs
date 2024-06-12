@@ -1,8 +1,10 @@
 use ira_drum::{self, DrumBuilder, Texture};
 
 fn main() {
+	let mut drum = DrumBuilder::default();
 	let gltf = gltf::Gltf::open("models/bottled_car/scene.gltf").unwrap();
-	let mut drum = DrumBuilder::from_gltf(&gltf, "models/bottled_car".as_ref()).unwrap();
+
+	drum.add_gltf(&gltf, "models/bottled_car".as_ref()).unwrap();
 
 	drum.set_brdf_lut(Texture::from_path("./ibl_brdf_lut.png").unwrap());
 	drum.set_irradiance_map(

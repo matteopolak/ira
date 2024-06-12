@@ -215,7 +215,7 @@ impl DrumBuilder {
 	pub fn from_gltf(gltf: &gltf::Gltf, root: &Path) -> gltf::Result<Self> {
 		let mut drum = DrumBuilder::default();
 
-		drum.extend_from_gltf(gltf, root)?;
+		drum.add_gltf(gltf, root)?;
 		Ok(drum)
 	}
 
@@ -226,7 +226,7 @@ impl DrumBuilder {
 	/// See [`gltf::Error`] for more information.
 	///
 	/// If a mesh does not contain normals, tex coords, or indices, a [`gltf::Error::MissingBlob`] will be returned.
-	pub fn extend_from_gltf(&mut self, gltf: &gltf::Gltf, root: &Path) -> gltf::Result<()> {
+	pub fn add_gltf(&mut self, gltf: &gltf::Gltf, root: &Path) -> gltf::Result<()> {
 		let mut meshes = Vec::new();
 
 		for material in gltf.materials() {

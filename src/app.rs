@@ -140,6 +140,7 @@ async fn request_adapter(instance: &wgpu::Instance, surface: &wgpu::Surface<'_>)
 		.expect("failed to find an appropriate adapter")
 }
 
+#[allow(clippy::too_many_arguments)]
 fn create_pbr_render_pipelines(
 	device: &wgpu::Device,
 	surface: &wgpu::Surface,

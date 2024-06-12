@@ -1,8 +1,8 @@
-use std::{borrow::Cow, num::NonZeroU32, path::Path};
+use std::{borrow::Cow, path::Path};
 
 use anyhow::{anyhow, Ok, Result};
 use glam::{Vec2, Vec3};
-use image::{ColorType, GenericImageView, RgbaImage};
+use image::GenericImageView;
 use wgpu::util::DeviceExt;
 
 use crate::Vertex;
@@ -291,7 +291,7 @@ impl Image {
 		};
 
 		// width and height of the texture
-		let (width, height) = self.mip_size(mip);
+		let (_width, height) = self.mip_size(mip);
 
 		// for no layers, return it all
 		if layer == 0 && layers == 1 {
@@ -323,6 +323,7 @@ impl Image {
 
 			let a = (self.mip_size(0).1 / 3 * 4) as f32;
 			let r: f32 = 1.0 / 2.0;
+			#[allow(clippy::cast_possible_wrap)]
 			let offset_x = (a * (1.0 - r.powi(mip as i32)) / (1.0 - r)) as u32;
 
 			let side = height / 3;

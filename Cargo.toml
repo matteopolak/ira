@@ -10,6 +10,7 @@ description = "A general-purpose, code-first game engine."
 license = "MIT"
 
 [dependencies]
+ira_drum.path = "./ira_drum"
 anyhow = "1"
 bytemuck = { version = "1", features = ["derive"] }
 env_logger = "0.11"

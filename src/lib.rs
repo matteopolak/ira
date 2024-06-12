@@ -11,7 +11,6 @@ pub mod app;
 pub mod camera;
 pub mod light;
 pub mod model;
-pub mod pipeline;
 pub mod texture;
 
 pub use app::App;

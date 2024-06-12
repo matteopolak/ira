@@ -7,7 +7,7 @@ use bincode::{
 	BorrowDecode, Decode, Encode,
 };
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct Handle<T> {
 	index: u32,
 	phantom: marker::PhantomData<T>,
