@@ -6,8 +6,10 @@ description = "A packaging format for textures and models."
 
 [dependencies]
 bincode = "2.0.0-rc.3"
+flate2 = "1"
 image = "0.25"
-image_dds = "0.5.1"
+image_dds = "0.5"
+tracing = "0.1"
 
 [dependencies.bytemuck]
 version = "1"

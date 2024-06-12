@@ -7,7 +7,6 @@ use bincode::{
 	BorrowDecode, Decode, Encode,
 };
 
-#[must_use]
 #[derive(Debug)]
 pub struct Handle<T> {
 	index: u32,
@@ -15,11 +14,17 @@ pub struct Handle<T> {
 }
 
 impl<T> Handle<T> {
+	#[must_use]
 	pub fn new(index: u32) -> Self {
 		Self {
 			index,
 			phantom: marker::PhantomData,
 		}
+	}
+
+	pub fn from_vec(vec: &mut Vec<T>, new: T) -> Self {
+		vec.push(new);
+		Self::new(vec.len() as u32 - 1)
 	}
 
 	pub fn resolve<'d>(&self, bank: &'d [T]) -> &'d T {

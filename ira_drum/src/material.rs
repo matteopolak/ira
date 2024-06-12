@@ -1,18 +1,21 @@
-use std::path::Path;
+use std::{fmt, io, path::Path};
 
 use bincode::{Decode, Encode};
+use image::{buffer::ConvertBuffer, DynamicImage};
+use image_dds::SurfaceRgba8;
 
-use crate::handle::Handle;
+use crate::{handle::Handle, DrumBuilder};
 
 #[derive(Clone, Copy, Debug, Encode, Decode)]
 pub struct Extent3d {
-	pub width: u16,
-	pub height: u16,
-	pub depth: u8,
+	pub width: u32,
+	pub height: u32,
+	pub depth: u32,
 }
 
 impl Extent3d {
-	pub fn from_wh(width: u16, height: u16) -> Self {
+	#[must_use]
+	pub fn from_wh(width: u32, height: u32) -> Self {
 		Self {
 			width,
 			height,
@@ -20,8 +23,23 @@ impl Extent3d {
 		}
 	}
 
+	#[must_use]
+	pub fn from_whd(width: u32, height: u32, depth: u32) -> Self {
+		Self {
+			width,
+			height,
+			depth,
+		}
+	}
+
+	#[must_use]
 	pub fn len(&self) -> usize {
 		self.width as usize * self.height as usize * self.depth as usize
+	}
+
+	#[must_use]
+	pub fn is_empty(&self) -> bool {
+		self.width == 0 || self.height == 0 || self.depth == 0
 	}
 }
 
@@ -29,9 +47,9 @@ impl Extent3d {
 impl From<Extent3d> for wgpu::Extent3d {
 	fn from(value: Extent3d) -> Self {
 		Self {
-			width: u32::from(value.width),
-			height: u32::from(value.height),
-			depth_or_array_layers: u32::from(value.depth),
+			width: value.width,
+			height: value.height,
+			depth_or_array_layers: value.depth,
 		}
 	}
 }
@@ -47,14 +65,59 @@ pub enum Format {
 	Depth32Float,
 	Bc1RgbaUnorm,
 	Bc1RgbaUnormSrgb,
-	Bc2RgbaUnorm,
-	Bc2RgbaUnormSrgb,
 	Bc3RgbaUnorm,
 	Bc3RgbaUnormSrgb,
 	Bc4RUnorm,
 	Bc5RgUnorm,
 	Bc7RgbaUnorm,
 	Bc7RgbaUnormSrgb,
+}
+
+impl Format {
+	/// Returns the size of a single pixel in bytes.
+	#[must_use]
+	pub fn bytes(&self) -> usize {
+		use Format::*;
+
+		match self {
+			R8Unorm => 1,
+			Rg8Unorm => 2,
+			Rgba8Unorm | Rgba8UnormSrgb | Depth32Float => 4,
+			Bc1RgbaUnorm | Bc1RgbaUnormSrgb | Bc4RUnorm => 8,
+			Rgba32Float | Bc5RgUnorm | Bc3RgbaUnorm | Bc3RgbaUnormSrgb | Bc7RgbaUnorm
+			| Bc7RgbaUnormSrgb => 16,
+		}
+	}
+
+	#[must_use]
+	pub fn to_compressed(&self) -> Option<Self> {
+		use Format::*;
+
+		Some(match self {
+			R8Unorm => Bc4RUnorm,
+			Rg8Unorm => Bc5RgUnorm,
+			Rgba8Unorm => Bc7RgbaUnorm,
+			Rgba8UnormSrgb => Bc7RgbaUnormSrgb,
+			_ => return None,
+		})
+	}
+}
+
+impl TryFrom<image::ColorType> for Format {
+	type Error = ();
+
+	fn try_from(value: image::ColorType) -> Result<Self, Self::Error> {
+		use image::ColorType as C;
+		use Format as F;
+
+		match value {
+			C::L8 => Ok(F::R8Unorm),
+			C::La8 => Ok(F::Rg8Unorm),
+			C::Rgba8 => Ok(F::Rgba8Unorm),
+			C::Rgba32F => Ok(F::Rgba32Float),
+			_ => Err(()),
+		}
+	}
 }
 
 #[cfg(feature = "gltf")]
@@ -90,8 +153,6 @@ impl From<Format> for wgpu::TextureFormat {
 			F::Depth32Float => W::Depth32Float,
 			F::Bc1RgbaUnorm => W::Bc1RgbaUnorm,
 			F::Bc1RgbaUnormSrgb => W::Bc1RgbaUnormSrgb,
-			F::Bc2RgbaUnorm => W::Bc2RgbaUnorm,
-			F::Bc2RgbaUnormSrgb => W::Bc2RgbaUnormSrgb,
 			F::Bc3RgbaUnorm => W::Bc3RgbaUnorm,
 			F::Bc3RgbaUnormSrgb => W::Bc3RgbaUnormSrgb,
 			F::Bc4RUnorm => W::Bc4RUnorm,
@@ -102,11 +163,21 @@ impl From<Format> for wgpu::TextureFormat {
 	}
 }
 
-#[derive(Debug, Encode, Decode)]
+#[derive(Encode, Decode)]
 pub struct Texture {
 	pub extent: Extent3d,
 	pub format: Format,
 	pub data: Box<[u8]>,
+}
+
+impl fmt::Debug for Texture {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		f.debug_struct("Texture")
+			.field("extent", &self.extent)
+			.field("format", &self.format)
+			.field("data", &format_args!("Box<[u8; {}]>", self.data.len()))
+			.finish()
+	}
 }
 
 impl Texture {
@@ -116,6 +187,11 @@ impl Texture {
 		depth: 1,
 	};
 
+	pub fn into_handle(self, drum: &mut DrumBuilder) -> Handle<Texture> {
+		Handle::from_vec(&mut drum.textures, self)
+	}
+
+	#[must_use]
 	pub fn from_rgba_pixel(pixel: [u8; 4]) -> Self {
 		let extent = Self::DEFAULT_EXTENT;
 		let data = vec![pixel; extent.len()]
@@ -129,12 +205,14 @@ impl Texture {
 		}
 	}
 
+	#[must_use]
 	pub fn from_rgba_pixel_f32(pixel: [f32; 4]) -> Self {
 		let pixel = pixel.map(|p| (p * 255.0) as u8);
 
 		Self::from_rgba_pixel(pixel)
 	}
 
+	#[must_use]
 	pub fn from_rg_pixel(pixel: [u8; 2]) -> Self {
 		let extent = Self::DEFAULT_EXTENT;
 		let data = vec![pixel; extent.len()]
@@ -148,12 +226,14 @@ impl Texture {
 		}
 	}
 
+	#[must_use]
 	pub fn from_rg_pixel_f32(pixel: [f32; 2]) -> Self {
 		let pixel = pixel.map(|p| (p * 255.0) as u8);
 
 		Self::from_rg_pixel(pixel)
 	}
 
+	#[must_use]
 	pub fn from_r_pixel(pixel: u8) -> Self {
 		let extent = Self::DEFAULT_EXTENT;
 		let data = vec![pixel; extent.len()].into_boxed_slice();
@@ -165,19 +245,81 @@ impl Texture {
 		}
 	}
 
+	#[must_use]
 	pub fn from_r_pixel_f32(pixel: f32) -> Self {
 		let pixel = (pixel * 255.0) as u8;
 
 		Self::from_r_pixel(pixel)
 	}
+
+	/// Compresses the texture using `BCn` if possible.
+	///
+	/// # Errors
+	///
+	/// See [`image_dds::SurfaceRgba8::encode`].
+	pub fn compress(&mut self) -> Result<(), image_dds::error::SurfaceError> {
+		let Some(format) = self.format.to_compressed() else {
+			return Ok(());
+		};
+
+		// R8Unorm => Bc4RUnorm,
+		// Rg8Unorm => Bc5RgUnorm,
+		// Rgba8Unorm => Bc7RgbaUnorm,
+		// Rgba8UnormSrgb => Bc7RgbaUnormSrgb,
+
+		match format {
+			Format::Bc7RgbaUnorm => {
+				let surface = SurfaceRgba8 {
+					width: self.extent.width,
+					height: self.extent.height,
+					data: self.data.to_vec(),
+					depth: 1,
+					layers: self.extent.depth,
+					mipmaps: 1,
+				};
+
+				let surface = surface.encode(
+					image_dds::ImageFormat::BC7RgbaUnorm,
+					image_dds::Quality::Normal,
+					image_dds::Mipmaps::GeneratedAutomatic,
+				)?;
+
+				self.format = format;
+				self.data = surface.data.into_boxed_slice();
+			}
+			Format::Bc7RgbaUnormSrgb => {
+				let surface = SurfaceRgba8 {
+					width: self.extent.width,
+					height: self.extent.height,
+					data: self.data.to_vec(),
+					depth: 1,
+					layers: self.extent.depth,
+					mipmaps: 1,
+				};
+
+				let surface = surface.encode(
+					image_dds::ImageFormat::BC7RgbaUnormSrgb,
+					image_dds::Quality::Normal,
+					image_dds::Mipmaps::GeneratedAutomatic,
+				)?;
+
+				self.format = format;
+				self.data = surface.data.into_boxed_slice();
+			}
+			_ => {}
+		};
+
+		Ok(())
+	}
 }
 
 #[cfg(feature = "gltf")]
 impl Texture {
+	#[must_use]
 	pub fn from_gltf_data(data: gltf::image::Data) -> Self {
 		use image::buffer::ConvertBuffer;
 
-		let extent = Extent3d::from_wh(data.width as u16, data.height as u16);
+		let extent = Extent3d::from_wh(data.width, data.height);
 
 		let (data, format) = match data.format.try_into() {
 			Ok(format) => (data.pixels, format),
@@ -198,6 +340,151 @@ impl Texture {
 			data: data.into_boxed_slice(),
 		}
 	}
+
+	/// Loads a texture from a file.
+	///
+	/// # Errors
+	///
+	/// See [`image::open`].
+	pub fn from_path<P: AsRef<Path>>(path: P) -> image::ImageResult<Self> {
+		let image = image::open(path)?;
+
+		Ok(Self::from_image(image))
+	}
+
+	/// Converts a dynamic image into a texture.
+	///
+	/// # Panics
+	///
+	/// Panics if the image format is not supported.
+	#[must_use]
+	pub fn from_image(image: DynamicImage) -> Self {
+		let extent = Extent3d::from_wh(image.width(), image.height());
+		let (data, format) = match image {
+			DynamicImage::ImageLuma8(image) => (image.into_raw(), Format::R8Unorm),
+			DynamicImage::ImageLumaA8(image) => (image.into_raw(), Format::Rg8Unorm),
+			DynamicImage::ImageRgb8(image) => {
+				let image: image::RgbaImage = image.convert();
+
+				(image.into_raw(), Format::Rgba8Unorm)
+			}
+			DynamicImage::ImageRgba8(image) => (image.into_raw(), Format::Rgba8Unorm),
+			DynamicImage::ImageRgb32F(image) => {
+				(bytemuck::cast_slice(&image).to_vec(), Format::Rgba32Float)
+			}
+			_ => panic!("unsupported image format"),
+		};
+
+		Self {
+			extent,
+			format,
+			data: data.into_boxed_slice(),
+		}
+	}
+
+	/// Converts a texture into a cubemap texture with 6 layers.
+	///
+	/// Four formats are supported:
+	///
+	///    +Y          +X
+	/// -X +Z +X -Z    -X
+	///    -Y          +Y
+	///                -Y
+	///    +Y          +Z
+	/// -X +Z +X       -Z
+	///    -Y
+	///    -Z
+	///
+	/// +X -X +Y -Y +Z -Z
+	///
+	/// The output texture concatenates the layers in the following order:
+	/// +X, -X, +Y, -Y, +Z, -Z.
+	///
+	/// # Errors
+	///
+	/// Returns an error if the input texture does not have the correct dimensions.
+	pub fn into_cubemap(self) -> Result<Self, ()> {
+		const TOP_LEFT_SIDE_CROSS: [(usize, usize); 6] = [
+			(2, 1), // +X
+			(0, 1), // -X
+			(1, 0), // +Y
+			(1, 2), // -Y
+			(1, 1), // +Z
+			(3, 1), // -Z
+		];
+
+		const TOP_LEFT_CROSS: [(usize, usize); 6] = [
+			(2, 1), // +X
+			(0, 1), // -X
+			(1, 0), // +Y
+			(1, 2), // -Y
+			(1, 1), // +Z
+			(1, 3), // -Z
+		];
+
+		const TOP_LEFT_LINE: [(usize, usize); 6] = [
+			(0, 0), // +X
+			(1, 0), // -X
+			(2, 0), // +Y
+			(3, 0), // -Y
+			(4, 0), // +Z
+			(5, 0), // -Z
+		];
+
+		const TOP_LEFT_POLE: [(usize, usize); 6] = [
+			(0, 0), // +X
+			(0, 1), // -X
+			(0, 2), // +Y
+			(0, 3), // -Y
+			(0, 4), // +Z
+			(0, 5), // -Z
+		];
+
+		let w = self.extent.width;
+		let h = self.extent.height;
+
+		// check for the first one
+		let (top_left, w, h) = if w / 4 == h / 3 {
+			(TOP_LEFT_SIDE_CROSS, w / 4, h / 3)
+		}
+		// check for the second one
+		else if w / 3 == h / 4 {
+			(TOP_LEFT_CROSS, w / 3, h / 4)
+		}
+		// check for the third one
+		else if w == h / 6 {
+			(TOP_LEFT_POLE, w, w)
+		}
+		// check for the fourth one
+		else if w / 6 == h {
+			(TOP_LEFT_LINE, h, h)
+		} else {
+			return Err(());
+		};
+
+		let (w, h) = (w as usize, h as usize);
+		let bytes_per_pixel = self.format.bytes();
+		let mut data = vec![0; (w * h * 6) as usize * bytes_per_pixel];
+
+		for (i, (x, y)) in top_left.into_iter().enumerate() {
+			let x = x * w;
+			let y = y * h;
+
+			for j in 0..h {
+				let src = (x + (y + j) * self.extent.width as usize) * bytes_per_pixel;
+				let dst = (j * w + i * w * h) * bytes_per_pixel;
+
+				data[dst..dst + w as usize * bytes_per_pixel]
+					.copy_from_slice(&self.data[src..src + w as usize * bytes_per_pixel]);
+			}
+		}
+
+		Ok(Self {
+			extent: Extent3d::from_whd(w as u32, h as u32, 6),
+			format: self.format,
+			data: data.into_boxed_slice(),
+		})
+	}
 }
 
 #[derive(Debug, Encode, Decode)]
@@ -212,21 +499,31 @@ pub struct Material {
 
 #[cfg(feature = "gltf")]
 impl Material {
-	pub fn from_gltf_material(material: &gltf::Material<'_>, root: &Path) -> Result<Self> {
-		let diffuse_texture = material
+	/// Creates a new material from a glTF material.
+	///
+	/// # Errors
+	///
+	/// Returns an error if the material's textures cannot be loaded.
+	/// See [`gltf::image::Data::from_source`] for more information.
+	pub fn from_gltf_material(
+		drum: &mut DrumBuilder,
+		material: &gltf::Material<'_>,
+		root: &Path,
+	) -> Result<Self, gltf::Error> {
+		let albedo_texture = material
 			.pbr_metallic_roughness()
 			.base_color_texture()
 			.map(|t| t.texture().source())
 			.map(|s| gltf::image::Data::from_source(s.source(), Some(root), &[]))
 			.transpose()?;
 
-		let diffuse_colour = material.pbr_metallic_roughness().base_color_factor();
-		let diffuse_texture = diffuse_texture.map_or_else(
-			|| Texture::from_rgba_pixel_f32(diffuse_colour),
+		let albedo_colour = material.pbr_metallic_roughness().base_color_factor();
+		let albedo = albedo_texture.map_or_else(
+			|| Texture::from_rgba_pixel_f32(albedo_colour),
 			Texture::from_gltf_data,
 		);
 
-		let normal_texture = material
+		let normal = material
 			.normal_texture()
 			.map(|t| t.texture().source())
 			.map(|s| gltf::image::Data::from_source(s.source(), Some(root), &[]))
@@ -237,7 +534,7 @@ impl Material {
 		let metallic_factor = metallic_roughness.metallic_factor();
 		let roughness_factor = metallic_roughness.roughness_factor();
 
-		let metallic_roughness_texture = metallic_roughness
+		let metallic_roughness = metallic_roughness
 			.metallic_roughness_texture()
 			.map(|t| t.texture().source())
 			.map(|s| gltf::image::Data::from_source(s.source(), Some(root), &[]))
@@ -245,23 +542,23 @@ impl Material {
 
 		// roughness = G
 		// metallic = B (will be written to R)
-		let metallic_roughness_texture = metallic_roughness_texture.map_or_else(
+		let metallic_roughness = metallic_roughness.map_or_else(
 			|| Texture::from_rg_pixel_f32([metallic_factor, roughness_factor]),
 			Texture::from_gltf_data,
 		);
 
-		let ao_texture = material
+		let ao = material
 			.occlusion_texture()
 			.map(|t| t.texture().source())
 			.map(|s| gltf::image::Data::from_source(s.source(), Some(root), &[]))
 			.transpose()?;
-		let ao_texture = ao_texture.map(Texture::from_gltf_data)?;
+		let ao_texture = ao.map(Texture::from_gltf_data);
 
 		Ok(Self {
-			albedo: diffuse_texture,
-			normal: normal_texture,
-			metallic_roughness: metallic_roughness_texture,
-			ao: ao_texture,
+			albedo: albedo.into_handle(drum),
+			normal: normal.map(|t| t.into_handle(drum)),
+			metallic_roughness: Some(metallic_roughness.into_handle(drum)),
+			ao: ao_texture.map(|t| t.into_handle(drum)),
 			transparent: material.alpha_mode() == gltf::material::AlphaMode::Blend,
 		})
 	}
