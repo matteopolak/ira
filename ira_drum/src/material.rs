@@ -1,4 +1,4 @@
-use std::{fmt, io, path::Path};
+use std::{fmt, path::Path};
 
 use bincode::{Decode, Encode};
 use image::{buffer::ConvertBuffer, DynamicImage};
@@ -257,6 +257,7 @@ impl Texture {
 	/// # Errors
 	///
 	/// See [`image_dds::SurfaceRgba8::encode`].
+	#[tracing::instrument]
 	pub fn compress(&mut self) -> Result<(), image_dds::error::SurfaceError> {
 		let Some(format) = self.format.to_compressed() else {
 			return Ok(());
@@ -316,6 +317,7 @@ impl Texture {
 #[cfg(feature = "gltf")]
 impl Texture {
 	#[must_use]
+	#[tracing::instrument]
 	pub fn from_gltf_data(data: gltf::image::Data) -> Self {
 		use image::buffer::ConvertBuffer;
 
@@ -358,6 +360,7 @@ impl Texture {
 	///
 	/// Panics if the image format is not supported.
 	#[must_use]
+	#[tracing::instrument]
 	pub fn from_image(image: DynamicImage) -> Self {
 		let extent = Extent3d::from_wh(image.width(), image.height());
 		let (data, format) = match image {
@@ -403,6 +406,7 @@ impl Texture {
 	/// # Errors
 	///
 	/// Returns an error if the input texture does not have the correct dimensions.
+	#[tracing::instrument]
 	pub fn into_cubemap(self) -> Result<Self, ()> {
 		const TOP_LEFT_SIDE_CROSS: [(usize, usize); 6] = [
 			(2, 1), // +X
@@ -464,7 +468,7 @@ impl Texture {
 
 		let (w, h) = (w as usize, h as usize);
 		let bytes_per_pixel = self.format.bytes();
-		let mut data = vec![0; (w * h * 6) as usize * bytes_per_pixel];
+		let mut data = vec![0; w * h * 6 * bytes_per_pixel];
 
 		for (i, (x, y)) in top_left.into_iter().enumerate() {
 			let x = x * w;
@@ -474,8 +478,8 @@ impl Texture {
 				let src = (x + (y + j) * self.extent.width as usize) * bytes_per_pixel;
 				let dst = (j * w + i * w * h) * bytes_per_pixel;
 
-				data[dst..dst + w as usize * bytes_per_pixel]
-					.copy_from_slice(&self.data[src..src + w as usize * bytes_per_pixel]);
+				data[dst..dst + w * bytes_per_pixel]
+					.copy_from_slice(&self.data[src..src + w * bytes_per_pixel]);
 			}
 		}
 
@@ -505,6 +509,7 @@ impl Material {
 	///
 	/// Returns an error if the material's textures cannot be loaded.
 	/// See [`gltf::image::Data::from_source`] for more information.
+	#[tracing::instrument]
 	pub fn from_gltf_material(
 		drum: &mut DrumBuilder,
 		material: &gltf::Material<'_>,

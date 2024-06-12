@@ -102,6 +102,7 @@ impl Drum {
 	/// # Errors
 	///
 	/// See [`super::material::Texture::compress`] for more information.
+	#[tracing::instrument]
 	pub fn compress_textures(&mut self) -> Result<(), image_dds::error::SurfaceError> {
 		for texture in &mut self.textures {
 			texture.compress()?;
@@ -223,6 +224,8 @@ impl DrumBuilder {
 	/// # Errors
 	///
 	/// See [`gltf::Error`] for more information.
+	///
+	/// If a mesh does not contain normals, tex coords, or indices, a [`gltf::Error::MissingBlob`] will be returned.
 	pub fn extend_from_gltf(&mut self, gltf: &gltf::Gltf, root: &Path) -> gltf::Result<()> {
 		let mut meshes = Vec::new();
 
@@ -250,8 +253,8 @@ impl DrumBuilder {
 
 				let material_index = primitive.material().index();
 
-				let positions = reader.read_positions().unwrap();
-				let normals = reader.read_normals().unwrap();
+				let positions = reader.read_positions().ok_or(gltf::Error::MissingBlob)?;
+				let normals = reader.read_normals().ok_or(gltf::Error::MissingBlob)?;
 				let tex_coords = reader.read_tex_coords(0);
 
 				let vertices = positions.zip(normals);
@@ -280,7 +283,11 @@ impl DrumBuilder {
 
 				num_vertices += vertices.len();
 
-				let indices = reader.read_indices().unwrap().into_u32().collect();
+				let indices = reader
+					.read_indices()
+					.ok_or(gltf::Error::MissingBlob)?
+					.into_u32()
+					.collect();
 
 				let mesh = Mesh {
 					vertices,

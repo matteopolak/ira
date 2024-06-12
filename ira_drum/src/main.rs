@@ -21,8 +21,5 @@ fn main() {
 	let mut drum = drum.build();
 
 	drum.compress_textures().unwrap();
-
-	println!("{drum:#?}");
-
 	drum.write_to_path("./car.drum").unwrap();
 }

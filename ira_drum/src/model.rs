@@ -190,6 +190,7 @@ impl fmt::Debug for Mesh {
 }
 
 impl Mesh {
+	#[tracing::instrument]
 	pub fn compute_tangents(&mut self) {
 		// compute tangents and bitangents
 		for i in 0..self.indices.len() / 3 {
