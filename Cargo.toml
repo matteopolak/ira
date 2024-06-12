@@ -14,7 +14,7 @@ ira_drum.path = "./ira_drum"
 anyhow = "1"
 bytemuck = { version = "1", features = ["derive"] }
 env_logger = "0.11"
-glam = "0.27"
+glam = "0.28"
 gltf = { version = "1", features = ["import"] }
 image = "0.25"
 log = "0.4"

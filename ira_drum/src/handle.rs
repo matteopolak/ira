@@ -30,6 +30,11 @@ impl<T> Handle<T> {
 	pub fn resolve<'d>(&self, bank: &'d [T]) -> &'d T {
 		&bank[self.index as usize]
 	}
+
+	#[must_use]
+	pub fn raw(&self) -> u32 {
+		self.index
+	}
 }
 
 impl<T> Encode for Handle<T> {

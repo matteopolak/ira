@@ -1,7 +1,6 @@
 use glam::Vec3;
+use ira_drum::Model;
 use wgpu::util::DeviceExt;
-
-use crate::model::Model;
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
@@ -97,7 +96,7 @@ impl GpuLight {
 	/// centroid of the model, with a large y value.
 	#[must_use]
 	pub fn from_model(model: &Model) -> Self {
-		let centroid = model.centroid;
+		let centroid: Vec3 = model.center.into();
 		let position = centroid + Vec3::Y * 10_000.0;
 
 		Self {

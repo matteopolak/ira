@@ -2,7 +2,7 @@ use std::{fmt, path::Path};
 
 use bincode::{Decode, Encode};
 use image::{buffer::ConvertBuffer, DynamicImage};
-use image_dds::SurfaceRgba8;
+use image_dds::Surface;
 
 use crate::{handle::Handle, DrumBuilder};
 
@@ -59,6 +59,8 @@ impl From<Extent3d> for wgpu::Extent3d {
 pub enum Format {
 	R8Unorm,
 	Rg8Unorm,
+	/// Stored as RGBA, alpha channel is treated as binary.
+	Rgb8A8Unorm,
 	Rgba8Unorm,
 	Rgba8UnormSrgb,
 	Rgba32Float,
@@ -82,7 +84,7 @@ impl Format {
 		match self {
 			R8Unorm => 1,
 			Rg8Unorm => 2,
-			Rgba8Unorm | Rgba8UnormSrgb | Depth32Float => 4,
+			Rgb8A8Unorm | Rgba8Unorm | Rgba8UnormSrgb | Depth32Float => 4,
 			Bc1RgbaUnorm | Bc1RgbaUnormSrgb | Bc4RUnorm => 8,
 			Rgba32Float | Bc5RgUnorm | Bc3RgbaUnorm | Bc3RgbaUnormSrgb | Bc7RgbaUnorm
 			| Bc7RgbaUnormSrgb => 16,
@@ -96,6 +98,7 @@ impl Format {
 		Some(match self {
 			R8Unorm => Bc4RUnorm,
 			Rg8Unorm => Bc5RgUnorm,
+			Rgb8A8Unorm => Bc1RgbaUnorm,
 			Rgba8Unorm => Bc7RgbaUnorm,
 			Rgba8UnormSrgb => Bc7RgbaUnormSrgb,
 			_ => return None,
@@ -117,6 +120,31 @@ impl TryFrom<image::ColorType> for Format {
 			C::Rgba32F => Ok(F::Rgba32Float),
 			_ => Err(()),
 		}
+	}
+}
+
+impl TryFrom<Format> for image_dds::ImageFormat {
+	type Error = ();
+
+	fn try_from(value: Format) -> Result<Self, Self::Error> {
+		use image_dds::ImageFormat as I;
+		use Format as F;
+
+		Ok(match value {
+			F::R8Unorm => I::R8Unorm,
+			F::Rgba8Unorm => I::Rgba8Unorm,
+			F::Rgba8UnormSrgb => I::Rgba8UnormSrgb,
+			F::Rgba32Float => I::Rgba32Float,
+			F::Bc1RgbaUnorm => I::BC1RgbaUnorm,
+			F::Bc1RgbaUnormSrgb => I::BC1RgbaUnormSrgb,
+			F::Bc3RgbaUnorm => I::BC3RgbaUnorm,
+			F::Bc3RgbaUnormSrgb => I::BC3RgbaUnormSrgb,
+			F::Bc4RUnorm => I::BC4RUnorm,
+			F::Bc5RgUnorm => I::BC5RgUnorm,
+			F::Bc7RgbaUnorm => I::BC7RgbaUnorm,
+			F::Bc7RgbaUnormSrgb => I::BC7RgbaUnormSrgb,
+			_ => return Err(()),
+		})
 	}
 }
 
@@ -147,7 +175,7 @@ impl From<Format> for wgpu::TextureFormat {
 		match value {
 			F::R8Unorm => W::R8Unorm,
 			F::Rg8Unorm => W::Rg8Unorm,
-			F::Rgba8Unorm => W::Rgba8Unorm,
+			F::Rgba8Unorm | F::Rgb8A8Unorm => W::Rgba8Unorm,
 			F::Rgba8UnormSrgb => W::Rgba8UnormSrgb,
 			F::Rgba32Float => W::Rgba32Float,
 			F::Depth32Float => W::Depth32Float,
@@ -176,6 +204,7 @@ impl fmt::Debug for Texture {
 		f.debug_struct("Texture")
 			.field("extent", &self.extent)
 			.field("format", &self.format)
+			.field("mipmaps", &self.mipmaps)
 			.field("data", &format_args!("Box<[u8; {}]>", self.data.len()))
 			.finish()
 	}
@@ -190,6 +219,30 @@ impl Texture {
 
 	pub fn into_handle(self, drum: &mut DrumBuilder) -> Handle<Texture> {
 		Handle::from_vec(&mut drum.textures, self)
+	}
+
+	#[must_use]
+	#[inline]
+	pub fn default_normal() -> Self {
+		Self::from_rgba_pixel([128, 128, 255, 255])
+	}
+
+	#[must_use]
+	#[inline]
+	pub fn default_metallic_roughness() -> Self {
+		Self::from_rgba_pixel([128, 128, 255, 255])
+	}
+
+	#[must_use]
+	#[inline]
+	pub fn default_ao() -> Self {
+		Self::from_r_pixel(255)
+	}
+
+	#[must_use]
+	#[inline]
+	pub fn default_emissive() -> Self {
+		Self::from_rgb_pixel([255, 255, 255])
 	}
 
 	#[must_use]
@@ -212,6 +265,30 @@ impl Texture {
 		let pixel = pixel.map(|p| (p * 255.0) as u8);
 
 		Self::from_rgba_pixel(pixel)
+	}
+
+	#[must_use]
+	pub fn from_rgb_pixel(pixel: [u8; 3]) -> Self {
+		let pixel = [pixel[0], pixel[1], pixel[2], 255];
+
+		let extent = Self::DEFAULT_EXTENT;
+		let data = vec![pixel; extent.len()]
+			.into_flattened()
+			.into_boxed_slice();
+
+		Self {
+			extent,
+			format: Format::Rgba8Unorm,
+			mipmaps: 1,
+			data,
+		}
+	}
+
+	#[must_use]
+	pub fn from_rgb_pixel_f32(pixel: [f32; 3]) -> Self {
+		let pixel = pixel.map(|p| (p * 255.0) as u8);
+
+		Self::from_rgb_pixel(pixel)
 	}
 
 	#[must_use]
@@ -267,54 +344,33 @@ impl Texture {
 			return Ok(());
 		};
 
-		// R8Unorm => Bc4RUnorm,
-		// Rg8Unorm => Bc5RgUnorm,
-		// Rgba8Unorm => Bc7RgbaUnorm,
-		// Rgba8UnormSrgb => Bc7RgbaUnormSrgb,
-
-		match format {
-			Format::Bc7RgbaUnorm => {
-				let surface = SurfaceRgba8 {
-					width: self.extent.width,
-					height: self.extent.height,
-					data: self.data.to_vec(),
-					depth: 1,
-					layers: self.extent.depth,
-					mipmaps: 1,
-				};
-
-				let surface = surface.encode(
-					image_dds::ImageFormat::BC7RgbaUnorm,
-					image_dds::Quality::Normal,
-					image_dds::Mipmaps::GeneratedAutomatic,
-				)?;
-
-				self.format = format;
-				self.data = surface.data.into_boxed_slice();
-				self.mipmaps = surface.mipmaps;
-			}
-			Format::Bc7RgbaUnormSrgb => {
-				let surface = SurfaceRgba8 {
-					width: self.extent.width,
-					height: self.extent.height,
-					data: self.data.to_vec(),
-					depth: 1,
-					layers: self.extent.depth,
-					mipmaps: 1,
-				};
-
-				let surface = surface.encode(
-					image_dds::ImageFormat::BC7RgbaUnormSrgb,
-					image_dds::Quality::Normal,
-					image_dds::Mipmaps::GeneratedAutomatic,
-				)?;
-
-				self.format = format;
-				self.data = surface.data.into_boxed_slice();
-				self.mipmaps = surface.mipmaps;
-			}
-			_ => {}
+		let Ok(surface_format) = self.format.try_into() else {
+			return Ok(());
 		};
+
+		let Ok(compressed_format) = format.try_into() else {
+			return Ok(());
+		};
+
+		let surface = Surface {
+			width: self.extent.width,
+			height: self.extent.height,
+			data: self.data.as_ref(),
+			depth: 1,
+			layers: self.extent.depth,
+			mipmaps: 1,
+			image_format: surface_format,
+		};
+
+		let surface = surface.encode(
+			compressed_format,
+			image_dds::Quality::Normal,
+			image_dds::Mipmaps::GeneratedAutomatic,
+		)?;
+
+		self.format = format;
+		self.data = surface.data.into_boxed_slice();
+		self.mipmaps = surface.mipmaps;
 
 		Ok(())
 	}
@@ -337,7 +393,7 @@ impl Texture {
 						.expect("invalid image data")
 						.convert();
 
-				(image.into_raw(), Format::Rgba8Unorm)
+				(image.into_raw(), Format::Rgb8A8Unorm)
 			}
 			Err(..) => panic!("unsupported image format"),
 		};
@@ -506,6 +562,7 @@ pub struct Material {
 	pub normal: Option<Handle<Texture>>,
 	pub metallic_roughness: Option<Handle<Texture>>,
 	pub ao: Option<Handle<Texture>>,
+	pub emissive: Option<Handle<Texture>>,
 
 	pub transparent: bool,
 }
@@ -566,13 +623,25 @@ impl Material {
 			.map(|t| t.texture().source())
 			.map(|s| gltf::image::Data::from_source(s.source(), Some(root), &[]))
 			.transpose()?;
-		let ao_texture = ao.map(Texture::from_gltf_data);
+		let ao = ao.map(Texture::from_gltf_data);
+
+		let emissive = material.emissive_factor();
+		let emissive_texture = material
+			.emissive_texture()
+			.map(|t| t.texture().source())
+			.map(|s| gltf::image::Data::from_source(s.source(), Some(root), &[]))
+			.transpose()?;
+		let emissive = emissive_texture.map_or_else(
+			|| Texture::from_rgb_pixel_f32(emissive),
+			Texture::from_gltf_data,
+		);
 
 		Ok(Self {
 			albedo: albedo.into_handle(drum),
 			normal: normal.map(|t| t.into_handle(drum)),
 			metallic_roughness: Some(metallic_roughness.into_handle(drum)),
-			ao: ao_texture.map(|t| t.into_handle(drum)),
+			ao: ao.map(|t| t.into_handle(drum)),
+			emissive: Some(emissive.into_handle(drum)),
 			transparent: material.alpha_mode() == gltf::material::AlphaMode::Blend,
 		})
 	}

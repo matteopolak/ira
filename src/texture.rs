@@ -417,60 +417,6 @@ impl Image {
 	}
 }
 
-impl From<image::DynamicImage> for Image {
-	fn from(image: image::DynamicImage) -> Self {
-		let dimensions = image.dimensions();
-		// keep RGBA32F, convert RGB32F to RGBA32F
-		// everything else, convert to RGBA8
-		let data = match image {
-			image::DynamicImage::ImageRgba8(img) => ImageData::Rgba8(img),
-			img @ image::DynamicImage::ImageRgb32F(..) => ImageData::Rgba32F(img.into_rgba32f()),
-			image::DynamicImage::ImageRgba32F(img) => ImageData::Rgba32F(img),
-			other => ImageData::Rgba8(other.into_rgba8()),
-		};
-
-		Self {
-			data,
-			dimensions,
-			..Default::default()
-		}
-	}
-}
-
-impl TryFrom<gltf::image::Data> for Image {
-	type Error = anyhow::Error;
-
-	fn try_from(data: gltf::image::Data) -> Result<Self, Self::Error> {
-		let dimensions = (data.width, data.height);
-
-		let image = match data.format {
-			gltf::image::Format::R8 => image::DynamicImage::ImageLuma8(
-				image::ImageBuffer::from_vec(data.width, data.height, data.pixels)
-					.ok_or_else(|| anyhow!("invalid image dimensions"))?,
-			),
-			gltf::image::Format::R8G8 => image::DynamicImage::ImageLumaA8(
-				image::ImageBuffer::from_vec(data.width, data.height, data.pixels)
-					.ok_or_else(|| anyhow!("invalid image dimensions"))?,
-			),
-			gltf::image::Format::R8G8B8 => image::DynamicImage::ImageRgb8(
-				image::ImageBuffer::from_vec(data.width, data.height, data.pixels)
-					.ok_or_else(|| anyhow!("invalid image dimensions"))?,
-			),
-			gltf::image::Format::R8G8B8A8 => image::DynamicImage::ImageRgba8(
-				image::ImageBuffer::from_vec(data.width, data.height, data.pixels)
-					.ok_or_else(|| anyhow!("invalid image dimensions"))?,
-			),
-			_ => return Err(anyhow!("unsupported image format")),
-		};
-
-		Ok(Self {
-			data: ImageData::Rgba8(image.into_rgba8()),
-			dimensions,
-			..Default::default()
-		})
-	}
-}
-
 #[derive(Debug)]
 pub struct Material {
 	pub diffuse: Texture,

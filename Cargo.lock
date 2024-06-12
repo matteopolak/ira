@@ -237,8 +237,7 @@ checksum = "9e1b586273c5702936fe7b7d6896644d8be71e6314cfe09d3167c95f712589e8"
 [[package]]
 name = "bcdec_rs"
 version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "78380141caa5a36218290ebf720f233b70b3c782d577d236b2271820e5308150"
+source = "git+https://github.com/matteopolak/image_dds.git#a02558a6895335ed2bc00f32c0964448f6a43f64"
 
 [[package]]
 name = "bincode"
@@ -822,9 +821,9 @@ dependencies = [
 
 [[package]]
 name = "glam"
-version = "0.27.0"
+version = "0.28.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9e05e7e6723e3455f4818c7b26e855439f7546cf617ef669d1adedb8669e5cb9"
+checksum = "779ae4bf7e8421cf91c0b3b64e7e8b40b862fba4d393f59150042de7c4965a94"
 
 [[package]]
 name = "glow"
@@ -847,7 +846,7 @@ dependencies = [
  "base64",
  "byteorder",
  "gltf-json",
- "image 0.25.1",
+ "image",
  "lazy_static",
  "serde_json",
  "urlencoding",
@@ -1000,24 +999,6 @@ checksum = "9a3a5bfb195931eeb336b2a7b4d761daec841b97f947d34394601737a7bba5e4"
 
 [[package]]
 name = "image"
-version = "0.24.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5690139d2f55868e080017335e4b94cb7414274c74f1669c84fb5feba2c9f69d"
-dependencies = [
- "bytemuck",
- "byteorder",
- "color_quant",
- "exr",
- "gif",
- "jpeg-decoder",
- "num-traits",
- "png",
- "qoi",
- "tiff",
-]
-
-[[package]]
-name = "image"
 version = "0.25.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fd54d660e773627692c524beaad361aca785a4f9f5730ce91f42aabe5bce3d11"
@@ -1052,14 +1033,13 @@ dependencies = [
 [[package]]
 name = "image_dds"
 version = "0.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "aeb76fb263814aa9dcc4370dda5b3c129ec9b711f5076ae584035c87db3ddc1f"
+source = "git+https://github.com/matteopolak/image_dds.git#a02558a6895335ed2bc00f32c0964448f6a43f64"
 dependencies = [
  "bcdec_rs",
  "bytemuck",
  "ddsfile",
  "half",
- "image 0.24.9",
+ "image",
  "intel_tex_2",
  "strum",
  "thiserror",
@@ -1089,9 +1069,9 @@ checksum = "a257582fdcde896fd96463bf2d40eefea0580021c0712a0e2b028b60b47a837a"
 
 [[package]]
 name = "intel_tex_2"
-version = "0.3.0"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "410e8e64fd296f11254dba8fccdc2ed35d8df41592fa96785ffc9877b6a9aaa5"
+checksum = "bd699c0e6adcac28c06db24a220c834c8ec811e0d2d80f0261bb14e01737b4dc"
 dependencies = [
  "ispc_rt",
 ]
@@ -1116,7 +1096,7 @@ dependencies = [
  "env_logger",
  "glam",
  "gltf",
- "image 0.25.1",
+ "image",
  "ira_drum",
  "log",
  "pollster",
@@ -1132,8 +1112,9 @@ dependencies = [
  "bincode",
  "bytemuck",
  "flate2",
+ "glam",
  "gltf",
- "image 0.25.1",
+ "image",
  "image_dds",
  "tracing",
  "wgpu",
@@ -1206,9 +1187,6 @@ name = "jpeg-decoder"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f5d4a7da358eff58addd2877a45865158f0d78c911d43a5784ceb7bbf52833b0"
-dependencies = [
- "rayon",
-]
 
 [[package]]
 name = "js-sys"

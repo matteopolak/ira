@@ -44,6 +44,26 @@ impl Vec3 {
 	}
 }
 
+#[cfg(feature = "glam")]
+impl From<glam::Vec3> for Vec3 {
+	fn from(glam::Vec3 { x, y, z }: glam::Vec3) -> Self {
+		Self::new(x, y, z)
+	}
+}
+
+#[cfg(feature = "glam")]
+impl From<Vec3> for glam::Vec3 {
+	fn from(Vec3 { x, y, z }: Vec3) -> Self {
+		glam::Vec3::new(x, y, z)
+	}
+}
+
+impl From<Vec3> for [f32; 3] {
+	fn from(Vec3 { x, y, z }: Vec3) -> [f32; 3] {
+		[x, y, z]
+	}
+}
+
 impl From<[f32; 3]> for Vec3 {
 	fn from([x, y, z]: [f32; 3]) -> Self {
 		Self::new(x, y, z)
@@ -71,6 +91,14 @@ impl ops::Sub for Vec3 {
 
 	fn sub(self, rhs: Self) -> Self {
 		Self::new(self.x - rhs.x, self.y - rhs.y, self.z - rhs.z)
+	}
+}
+
+impl ops::Add for Vec3 {
+	type Output = Self;
+
+	fn add(self, rhs: Self) -> Self {
+		Self::new(self.x + rhs.x, self.y + rhs.y, self.z + rhs.z)
 	}
 }
 
@@ -108,6 +136,20 @@ impl Vec2 {
 
 	pub const fn new(x: f32, y: f32) -> Self {
 		Self { x, y }
+	}
+}
+
+#[cfg(feature = "glam")]
+impl From<glam::Vec2> for Vec2 {
+	fn from(glam::Vec2 { x, y }: glam::Vec2) -> Self {
+		Self::new(x, y)
+	}
+}
+
+#[cfg(feature = "glam")]
+impl From<Vec2> for glam::Vec2 {
+	fn from(Vec2 { x, y }: Vec2) -> Self {
+		glam::Vec2::new(x, y)
 	}
 }
 
@@ -235,7 +277,13 @@ impl Mesh {
 }
 
 #[derive(Debug, Encode, Decode)]
+pub struct Meshes {
+	pub opaque: Box<[Handle<Mesh>]>,
+	pub transparent: Box<[Handle<Mesh>]>,
+}
+
+#[derive(Debug, Encode, Decode)]
 pub struct Model {
-	pub meshes: Box<[Handle<Mesh>]>,
+	pub meshes: Meshes,
 	pub center: Vec3,
 }

@@ -8,12 +8,18 @@ description = "A packaging format for textures and models."
 bincode = "2.0.0-rc.3"
 flate2 = "1"
 image = "0.25"
-image_dds = "0.5"
 tracing = "0.1"
+
+[dependencies.image_dds]
+git = "https://github.com/matteopolak/image_dds.git"
 
 [dependencies.bytemuck]
 version = "1"
 features = ["derive"]
+optional = true
+
+[dependencies.glam]
+version = "0.28"
 optional = true
 
 [dependencies.gltf]
@@ -25,7 +31,8 @@ version = "0.20"
 optional = true
 
 [features]
-default = ["wgpu", "bytemuck", "gltf"]
+default = ["wgpu", "bytemuck", "gltf", "glam"]
 wgpu = ["dep:wgpu"]
 bytemuck = ["dep:bytemuck"]
+glam = ["dep:glam"]
 gltf = ["dep:gltf"]

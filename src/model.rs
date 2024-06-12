@@ -3,9 +3,13 @@ use std::{fmt, mem, ops::Range, path::Path};
 use bytemuck::{Pod, Zeroable};
 use glam::{Mat4, Vec2, Vec3};
 use gltf::Gltf;
+use ira_drum::Handle;
 use wgpu::util::DeviceExt;
 
-use crate::texture::{self, Material};
+use crate::{
+	ext::{GpuDrum, GpuTexture},
+	texture::{self, Material},
+};
 
 #[derive(Debug)]
 pub struct Vertex {
@@ -58,24 +62,32 @@ pub struct GpuVertex {
 	pub tangent: [f32; 3],
 }
 
-#[derive(Debug, Default)]
-pub struct Meshes {
-	pub opaque: Vec<Mesh>,
-	pub transparent: Vec<Mesh>,
-}
-
-#[must_use]
 #[derive(Debug)]
-pub struct Model {
-	pub meshes: Meshes,
-	pub materials: Vec<GpuMaterial>,
-	pub centroid: Vec3,
-
-	pub instances: Vec<Instance>,
+pub struct Meshes {
+	pub opaque: Box<[Handle<GpuMesh>]>,
+	pub transparent: Box<[Handle<GpuMesh>]>,
 }
 
+impl From<ira_drum::Meshes> for Meshes {
+	fn from(meshes: ira_drum::Meshes) -> Self {
+		Self {
+			opaque: meshes
+				.opaque
+				.into_iter()
+				.map(|h| Handle::new(h.raw()))
+				.collect(),
+			transparent: meshes
+				.transparent
+				.into_iter()
+				.map(|h| Handle::new(h.raw()))
+				.collect(),
+		}
+	}
+}
+
+#[derive(Debug)]
 pub struct GpuModel {
-	pub model: Model,
+	pub meshes: Meshes,
 	pub instance_buffer: wgpu::Buffer,
 	pub instances: Vec<GpuInstance>,
 }
@@ -135,210 +147,36 @@ impl Instance {
 }
 
 #[derive(Debug)]
-pub struct Mesh {
-	pub name: String,
-	pub vertex_buffer: wgpu::Buffer,
-	pub index_buffer: wgpu::Buffer,
-	pub num_elements: u32,
-	pub material: usize,
+pub struct GpuMaterial {
+	pub albedo: Handle<GpuTexture>,
+	pub normal: Handle<GpuTexture>,
+	pub metallic_roughness: Handle<GpuTexture>,
+	pub ao: Handle<GpuTexture>,
+	pub emissive: Handle<GpuTexture>,
+
+	pub transparent: bool,
+	pub bind_group: wgpu::BindGroup,
 }
 
 #[derive(Debug)]
-pub struct GpuMaterial {
-	material: Material,
-	bind_group: wgpu::BindGroup,
+pub struct GpuMesh {
+	pub vertex_buffer: wgpu::Buffer,
+	pub index_buffer: wgpu::Buffer,
+	pub material: Handle<GpuMaterial>,
+
+	pub num_indices: u32,
 }
 
-impl Model {
-	pub fn into_gpu(self, device: &wgpu::Device) -> GpuModel {
-		let instances = self
-			.instances
-			.iter()
-			.map(Instance::to_gpu)
-			.collect::<Vec<_>>();
-
-		let instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-			label: Some("Instance Buffer"),
-			contents: bytemuck::cast_slice(&instances),
-			usage: wgpu::BufferUsages::VERTEX,
-		});
-
-		GpuModel {
-			model: self,
-			instance_buffer,
-			instances,
-		}
-	}
-
-	pub fn with_instance(mut self, instance: Instance) -> Self {
-		self.instances.push(instance);
-		self
-	}
-
-	/// Load a model from a glTF or OBJ file.
-	///
-	/// # Errors
-	/// See [`Model::from_path_gltf`] and [`Model::from_path_obj`] for possible errors.
-	pub async fn from_path<P>(
-		path: P,
-		device: &wgpu::Device,
-		queue: &wgpu::Queue,
-		layout: &wgpu::BindGroupLayout,
-	) -> anyhow::Result<Self>
-	where
-		P: AsRef<Path> + fmt::Debug,
-	{
-		match path.as_ref().extension().and_then(|s| s.to_str()) {
-			Some("gltf") => Self::from_path_gltf(path, device, queue, layout).await,
-			_ => Err(anyhow::anyhow!("unsupported model format")),
-		}
-	}
-
-	/// Loads a model from a glTF file.
-	///
-	/// # Errors
-	/// Returns an error if the file cannot be read or the glTF data is invalid.
-	/// Returns an error if the glTF file references external data and the root path cannot be determined.
-	pub async fn from_path_gltf<P>(
-		path: P,
-		device: &wgpu::Device,
-		queue: &wgpu::Queue,
-		layout: &wgpu::BindGroupLayout,
-	) -> anyhow::Result<Self>
-	where
-		P: AsRef<Path> + fmt::Debug,
-	{
-		let root = path
-			.as_ref()
-			.parent()
-			.ok_or_else(|| anyhow::anyhow!("expected path to file"))?;
-		let gltf = Gltf::open(path.as_ref())?;
-
-		let mut materials = Vec::new();
-
-		for material in gltf.materials() {
-			let material = texture::Material::from_gltf_material(device, queue, &material, root)?;
-			let bind_group = material.create_bind_group(device, layout);
-
-			materials.push(GpuMaterial {
-				material,
-				bind_group,
-			});
-		}
-
-		let buffers = gltf
-			.buffers()
-			.map(|b| {
-				let data = gltf::buffer::Data::from_source(b.source(), Some(root))?;
-
-				Ok(data.0)
-			})
-			.collect::<Result<Vec<_>, anyhow::Error>>()?;
-
-		let mut centroid = Vec3::ZERO;
-		let mut num_vertices = 0;
-
-		let mut meshes = Meshes::default();
-
-		for mesh in gltf.meshes() {
-			for primitive in mesh.primitives() {
-				let reader = primitive.reader(|buffer| Some(&buffers[buffer.index()]));
-
-				let material_index = primitive.material().index();
-
-				let positions = reader
-					.read_positions()
-					.ok_or_else(|| anyhow::anyhow!("mesh primitive does not have positions"))?;
-				let normals = reader
-					.read_normals()
-					.ok_or_else(|| anyhow::anyhow!("mesh primitive does not have normals"))?;
-				let tex_coords = reader.read_tex_coords(0);
-
-				let vertices = positions.zip(normals);
-				let mut vertices = if let Some(tex_coords) = tex_coords {
-					vertices
-						.zip(tex_coords.into_f32())
-						.map(|((position, normal), tex_coord)| {
-							centroid += Vec3::from(position);
-
-							Vertex::new(
-								position.into(),
-								normal.into(),
-								tex_coord.map(f32::fract).into(),
-							)
-						})
-						.collect::<Vec<_>>()
-				} else {
-					vertices
-						.map(|(position, normal)| {
-							centroid += Vec3::from(position);
-
-							Vertex::new(position.into(), normal.into(), Vec2::ZERO)
-						})
-						.collect::<Vec<_>>()
-				};
-
-				num_vertices += vertices.len();
-
-				let indices = reader
-					.read_indices()
-					.ok_or_else(|| anyhow::anyhow!("mesh primitive does not have indices"))?
-					.into_u32()
-					.collect::<Vec<_>>();
-
-				texture::compute_tangents(&mut vertices, &indices);
-
-				let vertices = vertices
-					.into_iter()
-					.map(Vertex::into_gpu)
-					.collect::<Vec<_>>();
-
-				let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-					label: Some(&format!("{path:?} Vertex Buffer")),
-					contents: bytemuck::cast_slice(&vertices),
-					usage: wgpu::BufferUsages::VERTEX,
-				});
-				let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-					label: Some(&format!("{path:?} Index Buffer")),
-					contents: bytemuck::cast_slice(&indices),
-					usage: wgpu::BufferUsages::INDEX,
-				});
-
-				let mesh = Mesh {
-					name: mesh.name().unwrap_or_default().to_string(),
-					vertex_buffer,
-					index_buffer,
-					num_elements: indices.len() as u32,
-					material: material_index.unwrap_or(0),
-				};
-
-				if materials[mesh.material].material.transparent {
-					meshes.transparent.push(mesh);
-				} else {
-					meshes.opaque.push(mesh);
-				}
-			}
-		}
-
-		centroid /= num_vertices as f32;
-
-		Ok(Model::new(meshes, materials, centroid))
-	}
-
-	pub fn new(meshes: Meshes, materials: Vec<GpuMaterial>, centroid: Vec3) -> Self {
-		Self {
-			meshes,
-			materials,
-			centroid,
-			instances: Vec::new(),
-		}
-	}
+#[derive(Debug)]
+pub struct GpuMeshes {
+	pub opaque: Box<[GpuMesh]>,
+	pub transparent: Box<[GpuMesh]>,
 }
 
 pub trait DrawModel<'a> {
 	fn draw_mesh_instanced(
 		&mut self,
-		mesh: &'a Mesh,
+		mesh: &'a GpuMesh,
 		material: &'a GpuMaterial,
 		instances: Range<u32>,
 		camera_bind_group: &'a wgpu::BindGroup,
@@ -348,7 +186,8 @@ pub trait DrawModel<'a> {
 
 	fn draw_model_instanced(
 		&mut self,
-		gpu_model: &'a GpuModel,
+		drum: &'a GpuDrum,
+		model: &'a GpuModel,
 		camera_bind_group: &'a wgpu::BindGroup,
 		light_bind_group: &'a wgpu::BindGroup,
 		brdf_bind_group: &'a wgpu::BindGroup,
@@ -362,7 +201,7 @@ where
 {
 	fn draw_mesh_instanced(
 		&mut self,
-		mesh: &'b Mesh,
+		mesh: &'b GpuMesh,
 		material: &'a GpuMaterial,
 		instances: Range<u32>,
 		camera_bind_group: &'b wgpu::BindGroup,
@@ -375,29 +214,29 @@ where
 		self.set_bind_group(1, camera_bind_group, &[]);
 		self.set_bind_group(2, light_bind_group, &[]);
 		self.set_bind_group(3, brdf_bind_group, &[]);
-		self.draw_indexed(0..mesh.num_elements, 0, instances);
+		self.draw_indexed(0..mesh.num_indices, 0, instances);
 	}
 
 	fn draw_model_instanced(
 		&mut self,
-		gpu_model: &'b GpuModel,
+		drum: &'b GpuDrum,
+		model: &'b GpuModel,
 		camera_bind_group: &'b wgpu::BindGroup,
 		light_bind_group: &'b wgpu::BindGroup,
 		brdf_bind_group: &'b wgpu::BindGroup,
 		transparent: bool,
 	) {
-		let model = &gpu_model.model;
-
 		let meshes = if transparent {
 			&model.meshes.transparent
 		} else {
 			&model.meshes.opaque
 		};
 
-		self.set_vertex_buffer(1, gpu_model.instance_buffer.slice(..));
+		self.set_vertex_buffer(1, model.instance_buffer.slice(..));
 
 		for mesh in meshes {
-			let material = &model.materials[mesh.material];
+			let mesh = mesh.resolve(&drum.meshes);
+			let material = mesh.material.resolve(&drum.materials);
 
 			self.draw_mesh_instanced(
 				mesh,

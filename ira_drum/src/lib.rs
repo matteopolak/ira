@@ -26,10 +26,12 @@
 
 pub mod drum;
 pub mod handle;
+pub mod light;
 pub mod material;
 pub mod model;
 
 pub use drum::*;
 pub use handle::*;
+pub use light::*;
 pub use material::*;
 pub use model::*;

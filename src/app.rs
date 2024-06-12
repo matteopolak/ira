@@ -1,5 +1,7 @@
 use crate::{
-	camera, light,
+	camera,
+	ext::{self, DrumExt, GpuDrum, ModelExt},
+	light,
 	model::{self, DrawModel, Instance},
 	texture::{self, Material},
 };
@@ -7,6 +9,7 @@ use crate::{
 use std::{sync::Arc, time};
 
 use glam::Vec3;
+use ira_drum::Drum;
 use winit::{
 	application::ApplicationHandler,
 	event::{DeviceEvent, KeyEvent, MouseButton, WindowEvent},
@@ -17,11 +20,11 @@ use winit::{
 
 pub struct App {
 	state: Option<State>,
-	on_ready: fn(&mut State),
+	on_ready: fn(&mut Window) -> Drum,
 }
 
 impl App {
-	pub fn new(on_ready: fn(&mut State)) -> Self {
+	pub fn new(on_ready: fn(&mut Window) -> Drum) -> Self {
 		Self {
 			state: None,
 			on_ready,
@@ -33,6 +36,7 @@ impl App {
 	/// This function will block the current thread until the application is closed.
 	///
 	/// # Errors
+	///
 	/// See [`winit::error::EventLoopError`] for errors.
 	pub fn run(mut self) -> Result<(), winit::error::EventLoopError> {
 		let event_loop = EventLoop::new()?;
@@ -111,7 +115,9 @@ pub struct State {
 	last_frame: time::Instant,
 	pub sample_count: u32,
 
-	multisampled_texture: texture::Texture,
+	multisampled_texture: ext::GpuTexture,
+
+	drum: GpuDrum,
 }
 
 async fn request_device(adapter: &wgpu::Adapter) -> (wgpu::Device, wgpu::Queue) {
@@ -119,7 +125,8 @@ async fn request_device(adapter: &wgpu::Adapter) -> (wgpu::Device, wgpu::Queue) 
 		.request_device(
 			&wgpu::DeviceDescriptor {
 				label: None,
-				required_features: wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES,
+				required_features: wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES
+					| wgpu::Features::TEXTURE_COMPRESSION_BC,
 				required_limits: wgpu::Limits::downlevel_defaults()
 					.using_resolution(adapter.limits()),
 			},
@@ -209,118 +216,8 @@ fn create_pbr_render_pipelines(
 	(opaque_render_pipeline, transparent_render_pipeline)
 }
 
-fn create_brdf_bind_group(
-	device: &wgpu::Device,
-	queue: &wgpu::Queue,
-) -> anyhow::Result<(wgpu::BindGroup, wgpu::BindGroupLayout)> {
-	let ibl_brdf_lut =
-		texture::Image::try_from_path("./ibl_brdf_lut.png")?.to_texture(device, queue);
-	// 5 mip levels
-	let mut ibl_prefilter_map = texture::Image::try_from_path("./ibl_prefilter_map.png")?;
-	ibl_prefilter_map.view_dimension = wgpu::TextureViewDimension::Cube;
-	ibl_prefilter_map.mip_levels = Some(5);
-	ibl_prefilter_map.array_layers = 6;
-
-	let ibl_prefilter_map = ibl_prefilter_map.to_texture(device, queue);
-
-	// cubemap
-	let mut irradiance_map = texture::Image::try_from_path("./yokohama.jpg")?;
-	irradiance_map.view_dimension = wgpu::TextureViewDimension::Cube;
-	irradiance_map.array_layers = 6;
-	let irradiance_map = irradiance_map.to_texture(device, queue);
-
-	let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-		label: None,
-		entries: &[
-			wgpu::BindGroupLayoutEntry {
-				binding: 0,
-				visibility: wgpu::ShaderStages::FRAGMENT,
-				ty: wgpu::BindingType::Texture {
-					sample_type: wgpu::TextureSampleType::Float { filterable: true },
-					multisampled: false,
-					view_dimension: wgpu::TextureViewDimension::D2,
-				},
-				count: None,
-			},
-			wgpu::BindGroupLayoutEntry {
-				binding: 1,
-				visibility: wgpu::ShaderStages::FRAGMENT,
-				ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-				count: None,
-			},
-			wgpu::BindGroupLayoutEntry {
-				binding: 2,
-				visibility: wgpu::ShaderStages::FRAGMENT,
-				ty: wgpu::BindingType::Texture {
-					sample_type: wgpu::TextureSampleType::Float { filterable: true },
-					multisampled: false,
-					view_dimension: wgpu::TextureViewDimension::Cube,
-				},
-				count: None,
-			},
-			wgpu::BindGroupLayoutEntry {
-				binding: 3,
-				visibility: wgpu::ShaderStages::FRAGMENT,
-				ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-				count: None,
-			},
-			wgpu::BindGroupLayoutEntry {
-				binding: 4,
-				visibility: wgpu::ShaderStages::FRAGMENT,
-				ty: wgpu::BindingType::Texture {
-					sample_type: wgpu::TextureSampleType::Float { filterable: true },
-					multisampled: false,
-					view_dimension: wgpu::TextureViewDimension::Cube,
-				},
-				count: None,
-			},
-			wgpu::BindGroupLayoutEntry {
-				binding: 5,
-				visibility: wgpu::ShaderStages::FRAGMENT,
-				ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-				count: None,
-			},
-		],
-	});
-
-	let brdf_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-		label: None,
-		layout: &layout,
-		entries: &[
-			wgpu::BindGroupEntry {
-				binding: 0,
-				resource: wgpu::BindingResource::TextureView(&ibl_brdf_lut.view),
-			},
-			wgpu::BindGroupEntry {
-				binding: 1,
-				resource: wgpu::BindingResource::Sampler(&ibl_brdf_lut.sampler),
-			},
-			wgpu::BindGroupEntry {
-				binding: 2,
-				resource: wgpu::BindingResource::TextureView(&ibl_prefilter_map.view),
-			},
-			wgpu::BindGroupEntry {
-				binding: 3,
-				resource: wgpu::BindingResource::Sampler(&ibl_prefilter_map.sampler),
-			},
-			wgpu::BindGroupEntry {
-				binding: 4,
-				resource: wgpu::BindingResource::TextureView(&irradiance_map.view),
-			},
-			wgpu::BindGroupEntry {
-				binding: 5,
-				resource: wgpu::BindingResource::Sampler(&irradiance_map.sampler),
-			},
-		],
-	});
-
-	Ok((brdf_bind_group, layout))
-}
-
 impl State {
-	async fn new(window: Window) -> Self {
-		let _drum = ira_drum::Drum::from_path("./bottled_car.drum").unwrap();
-
+	async fn new(window: Window, drum: Drum) -> Self {
 		let window = Arc::new(window);
 		let size = window.inner_size();
 		let instance = wgpu::Instance::default();
@@ -367,7 +264,7 @@ impl State {
 		let camera = camera::Camera::new(&camera_builder).create_on_device(&device);
 		let controller = camera::CameraController::new(camera, camera_builder);
 		let (brdf_bind_group, brdf_bind_group_layout) =
-			create_brdf_bind_group(&device, &queue).unwrap();
+			drum.create_brdf_bind_group(&device, &queue);
 
 		let lights = light::Lights::from_lights(
 			&[
@@ -389,7 +286,13 @@ impl State {
 		);
 
 		let multisampled_texture =
-			texture::Texture::create_multisampled(&device, &config, sample_count);
+			ext::GpuTexture::create_multisampled(&device, &config, sample_count);
+
+		let models = drum
+			.models
+			.into_iter()
+			.map(|model| model.to_gpu(&device, &[Instance::from_up(Vec3::ZERO, Vec3::Z)]))
+			.collect();
 
 		Self {
 			window,
@@ -408,7 +311,7 @@ impl State {
 			controller,
 			depth_texture,
 
-			models: Vec::new(),
+			models,
 			lights,
 
 			last_frame: time::Instant::now(),
@@ -517,6 +420,7 @@ impl State {
 
 		for model in &self.models {
 			rpass.draw_model_instanced(
+				&self.drum,
 				model,
 				&self.controller.camera.bind_group,
 				&self.lights.bind_group,
@@ -558,16 +462,16 @@ impl State {
 
 impl ApplicationHandler for App {
 	fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-		let window = event_loop
+		let mut window = event_loop
 			.create_window(WindowAttributes::default().with_title("Triangle"))
 			.unwrap();
 
 		window.set_cursor_grab(CursorGrabMode::Locked).unwrap();
 		window.set_cursor_visible(false);
 
-		let mut state = pollster::block_on(State::new(window));
+		let drum = (self.on_ready)(&mut window);
+		let state = pollster::block_on(State::new(window, drum));
 
-		(self.on_ready)(&mut state);
 		self.state = Some(state);
 	}
 
