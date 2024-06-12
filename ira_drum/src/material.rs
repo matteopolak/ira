@@ -167,6 +167,7 @@ impl From<Format> for wgpu::TextureFormat {
 pub struct Texture {
 	pub extent: Extent3d,
 	pub format: Format,
+	pub mipmaps: u32,
 	pub data: Box<[u8]>,
 }
 
@@ -201,6 +202,7 @@ impl Texture {
 		Self {
 			extent,
 			format: Format::Rgba8Unorm,
+			mipmaps: 1,
 			data,
 		}
 	}
@@ -222,6 +224,7 @@ impl Texture {
 		Self {
 			extent,
 			format: Format::Rg8Unorm,
+			mipmaps: 1,
 			data,
 		}
 	}
@@ -241,6 +244,7 @@ impl Texture {
 		Self {
 			extent,
 			format: Format::R8Unorm,
+			mipmaps: 1,
 			data,
 		}
 	}
@@ -287,6 +291,7 @@ impl Texture {
 
 				self.format = format;
 				self.data = surface.data.into_boxed_slice();
+				self.mipmaps = surface.mipmaps;
 			}
 			Format::Bc7RgbaUnormSrgb => {
 				let surface = SurfaceRgba8 {
@@ -306,6 +311,7 @@ impl Texture {
 
 				self.format = format;
 				self.data = surface.data.into_boxed_slice();
+				self.mipmaps = surface.mipmaps;
 			}
 			_ => {}
 		};
@@ -339,6 +345,7 @@ impl Texture {
 		Self {
 			extent,
 			format,
+			mipmaps: 1,
 			data: data.into_boxed_slice(),
 		}
 	}
@@ -381,6 +388,7 @@ impl Texture {
 		Self {
 			extent,
 			format,
+			mipmaps: 1,
 			data: data.into_boxed_slice(),
 		}
 	}
@@ -486,6 +494,7 @@ impl Texture {
 		Ok(Self {
 			extent: Extent3d::from_whd(w as u32, h as u32, 6),
 			format: self.format,
+			mipmaps: 1,
 			data: data.into_boxed_slice(),
 		})
 	}

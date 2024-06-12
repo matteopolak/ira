@@ -319,6 +319,8 @@ fn create_brdf_bind_group(
 
 impl State {
 	async fn new(window: Window) -> Self {
+		let _drum = ira_drum::Drum::from_path("./bottled_car.drum").unwrap();
+
 		let window = Arc::new(window);
 		let size = window.inner_size();
 		let instance = wgpu::Instance::default();
