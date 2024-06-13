@@ -222,8 +222,8 @@ where
 		self.set_vertex_buffer(1, model.instance_buffer.slice(..));
 
 		for mesh in meshes {
-			let mesh = mesh.resolve(&drum.meshes);
-			let material = mesh.material.resolve(&drum.materials);
+			let mesh = mesh.resolve(&drum.meshes).unwrap();
+			let material = mesh.material.resolve(&drum.materials).unwrap();
 
 			self.draw_mesh_instanced(
 				mesh,

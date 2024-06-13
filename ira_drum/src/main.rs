@@ -8,7 +8,7 @@ fn main() {
 
 	drum.set_brdf_lut(Texture::from_path("./ibl_brdf_lut.png").unwrap());
 	drum.set_irradiance_map(
-		Texture::from_path("./ibl_irradiance_map.jpg")
+		Texture::from_path("./ibl_irradiance_map.png")
 			.unwrap()
 			.into_cubemap()
 			.unwrap(),
@@ -23,5 +23,5 @@ fn main() {
 	let mut drum = drum.build();
 
 	drum.compress_textures().unwrap();
-	drum.write_to_path("./car.drum").unwrap();
+	drum.write_to_path("./bottled_car.drum").unwrap();
 }

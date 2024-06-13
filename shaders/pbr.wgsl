@@ -152,8 +152,9 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 	let ao = textureSample(t_ao, s_ao, in.tex_coords).r;
 
 	let metallic_roughness = textureSample(t_metallic_roughness, s_metallic_roughness, in.tex_coords);
+	// Normally this is in B, but we're using R due to how the texture is packed
+	let metallic = metallic_roughness.r;
 	let roughness = metallic_roughness.g;
-	let metallic = metallic_roughness.b;
 
 	let tbn = mat3x3<f32>(
 		in.tbn_matrix_0,

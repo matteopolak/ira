@@ -35,8 +35,8 @@ impl<T> Handle<T> {
 		Self::new(vec.len() as u32 - 1)
 	}
 
-	pub fn resolve<'d>(&self, bank: &'d [T]) -> &'d T {
-		&bank[self.index as usize]
+	pub fn resolve<'d>(&self, bank: &'d [T]) -> Option<&'d T> {
+		bank.get(self.index as usize)
 	}
 
 	#[must_use]

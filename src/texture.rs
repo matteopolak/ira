@@ -20,9 +20,7 @@ impl TextureExt for ira_drum::Texture {
 				sample_count: 1,
 				dimension: wgpu::TextureDimension::D2,
 				format: self.format.into(),
-				usage: wgpu::TextureUsages::TEXTURE_BINDING
-					| wgpu::TextureUsages::COPY_DST
-					| wgpu::TextureUsages::RENDER_ATTACHMENT,
+				usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
 				view_formats: &[],
 			},
 			wgpu::util::TextureDataOrder::MipMajor,

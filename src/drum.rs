@@ -34,31 +34,23 @@ impl DrumExt for ira_drum::Drum {
 	fn into_gpu(self, device: &wgpu::Device, queue: &wgpu::Queue) -> GpuDrum {
 		let mut drum = GpuDrum::default();
 
-		let textures = self
+		drum.textures.bank = self
 			.textures
 			.iter()
 			.map(|t| t.to_gpu(device, queue))
 			.collect::<Vec<_>>();
 
-		let materials = IntoIterator::into_iter(self.materials)
+		drum.materials = IntoIterator::into_iter(self.materials)
 			.map(|m| m.into_gpu(device, queue, &mut drum))
 			.collect();
 
-		let meshes = self.meshes.iter().map(|m| m.to_gpu(device)).collect();
+		drum.meshes = self.meshes.iter().map(|m| m.to_gpu(device)).collect();
 
-		let models = IntoIterator::into_iter(self.models)
+		drum.models = IntoIterator::into_iter(self.models)
 			.map(|m| m.into_gpu(device, &[Instance::from_up(Vec3::ZERO, Vec3::Z)]))
 			.collect();
 
-		GpuDrum {
-			textures: GpuTextureCollection {
-				bank: textures,
-				..Default::default()
-			},
-			materials,
-			meshes,
-			models,
-		}
+		drum
 	}
 
 	fn create_brdf_bind_group(

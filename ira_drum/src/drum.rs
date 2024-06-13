@@ -291,7 +291,7 @@ impl DrumBuilder {
 					material: Handle::new(material_index.unwrap_or_default() as u32),
 				};
 
-				let transparent = mesh.material.resolve(&self.materials).transparent;
+				let transparent = mesh.material.resolve(&self.materials).unwrap().transparent;
 
 				if transparent {
 					transparent_meshes.push(self.add_mesh(mesh));
