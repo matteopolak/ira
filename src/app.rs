@@ -147,8 +147,6 @@ async fn request_adapter(instance: &wgpu::Instance, surface: &wgpu::Surface<'_>)
 #[allow(clippy::too_many_arguments)]
 fn create_pbr_render_pipelines(
 	device: &wgpu::Device,
-	surface: &wgpu::Surface,
-	adapter: &wgpu::Adapter,
 	material_bind_group_layout: &wgpu::BindGroupLayout,
 	brdf_bind_group_layout: &wgpu::BindGroupLayout,
 	controller: &camera::CameraController,
@@ -168,12 +166,11 @@ fn create_pbr_render_pipelines(
 		push_constant_ranges: &[],
 	});
 
-	let swapchain_capabilities = surface.get_capabilities(adapter);
 	let opaque_render_pipeline = create_render_pipeline(
 		device,
 		&pipeline_layout,
 		wgpu::ColorTargetState {
-			format: swapchain_capabilities.formats[0],
+			format: wgpu::TextureFormat::Rgba8UnormSrgb,
 			blend: None,
 			write_mask: wgpu::ColorWrites::ALL,
 		},
@@ -184,7 +181,7 @@ fn create_pbr_render_pipelines(
 
 	let transparent_render_pipeline = {
 		let transparent_target = wgpu::ColorTargetState {
-			format: swapchain_capabilities.formats[0],
+			format: wgpu::TextureFormat::Rgba8UnormSrgb,
 			blend: Some(wgpu::BlendState {
 				color: wgpu::BlendComponent {
 					src_factor: wgpu::BlendFactor::SrcAlpha,
@@ -226,7 +223,7 @@ impl State {
 
 		let config = wgpu::SurfaceConfiguration {
 			usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-			format: wgpu::TextureFormat::Bgra8UnormSrgb,
+			format: wgpu::TextureFormat::Rgba8UnormSrgb,
 			width: size.width,
 			height: size.height,
 			desired_maximum_frame_latency: 2,
@@ -256,12 +253,15 @@ impl State {
 		let depth_texture =
 			GpuTexture::create_depth_texture(&device, &config, sample_count, "depth_texture");
 
+		let (brdf_bind_group, brdf_bind_group_layout) =
+			drum.create_brdf_bind_group(&device, &queue);
+
+		let drum = drum.into_gpu(&device, &queue);
+
 		let material_bind_group_layout = Material::create_bind_group_layout(&device);
 		let camera_builder = camera::CameraBuilder::new(config.width as f32, config.height as f32);
 		let camera = camera::Camera::new(&camera_builder).create_on_device(&device);
 		let controller = camera::CameraController::new(camera, camera_builder);
-		let (brdf_bind_group, brdf_bind_group_layout) =
-			drum.create_brdf_bind_group(&device, &queue);
 
 		let lights = light::Lights::from_lights(
 			&[
@@ -273,8 +273,6 @@ impl State {
 
 		let (opaque_render_pipeline, transparent_render_pipeline) = create_pbr_render_pipelines(
 			&device,
-			&surface,
-			&adapter,
 			&material_bind_group_layout,
 			&brdf_bind_group_layout,
 			&controller,
@@ -283,8 +281,6 @@ impl State {
 		);
 
 		let multisampled_texture = GpuTexture::create_multisampled(&device, &config, sample_count);
-
-		let drum = drum.into_gpu(&device, &queue);
 
 		Self {
 			window,

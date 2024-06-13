@@ -1,8 +1,8 @@
-use std::{fmt, path::Path};
+use std::{fmt, fs, io, path::Path};
 
 use bincode::{Decode, Encode};
 use image::{buffer::ConvertBuffer, DynamicImage};
-use image_dds::Surface;
+use image_dds::{Mipmaps, Surface};
 
 use crate::{handle::Handle, DrumBuilder};
 
@@ -103,6 +103,34 @@ impl Format {
 			Rgba8UnormSrgb => Bc7RgbaUnormSrgb,
 			_ => return None,
 		})
+	}
+
+	#[must_use]
+	pub fn to_srgb(&self) -> Self {
+		use Format::*;
+
+		match self {
+			Rgba8Unorm => Rgba8UnormSrgb,
+			Bc1RgbaUnorm => Bc1RgbaUnormSrgb,
+			Bc3RgbaUnorm => Bc3RgbaUnormSrgb,
+			Bc7RgbaUnorm => Bc7RgbaUnormSrgb,
+			_ => *self,
+		}
+	}
+}
+
+impl From<Format> for image::ColorType {
+	fn from(value: Format) -> Self {
+		use image::ColorType as C;
+		use Format as F;
+
+		match value {
+			F::R8Unorm => C::L8,
+			F::Rg8Unorm => C::La8,
+			F::Rgb8A8Unorm | F::Rgba8Unorm | F::Rgba8UnormSrgb => C::Rgba8,
+			F::Rgba32Float => C::Rgba32F,
+			_ => unreachable!(),
+		}
 	}
 }
 
@@ -338,8 +366,11 @@ impl Texture {
 	/// # Errors
 	///
 	/// See [`image_dds::SurfaceRgba8::encode`].
-	#[tracing::instrument]
-	pub fn compress(&mut self) -> Result<(), image_dds::error::SurfaceError> {
+	#[tracing::instrument(skip(mipmaps))]
+	pub fn compress<F>(&mut self, mipmaps: F) -> Result<(), image_dds::error::SurfaceError>
+	where
+		F: Fn(Extent3d) -> Mipmaps,
+	{
 		let Some(format) = self.format.to_compressed() else {
 			return Ok(());
 		};
@@ -365,7 +396,7 @@ impl Texture {
 		let surface = surface.encode(
 			compressed_format,
 			image_dds::Quality::Normal,
-			image_dds::Mipmaps::GeneratedAutomatic,
+			mipmaps(self.extent),
 		)?;
 
 		self.format = format;
@@ -471,7 +502,7 @@ impl Texture {
 	///
 	/// Returns an error if the input texture does not have the correct dimensions.
 	#[tracing::instrument]
-	pub fn into_cubemap(self) -> Result<Self, ()> {
+	pub fn into_cubemap(self, n: u32) -> Result<Self, ()> {
 		const TOP_LEFT_SIDE_CROSS: [(usize, usize); 6] = [
 			(2, 1), // +X
 			(0, 1), // -X
@@ -532,18 +563,16 @@ impl Texture {
 
 		let (w, h) = (w as usize, h as usize);
 		let bytes_per_pixel = self.format.bytes();
-		let mut data = vec![0; w * h * 6 * bytes_per_pixel];
+		let mut data = Vec::with_capacity(w * h * 6 * bytes_per_pixel);
 
-		for (i, (x, y)) in top_left.into_iter().enumerate() {
+		for (x, y) in top_left {
 			let x = x * w;
 			let y = y * h;
 
 			for j in 0..h {
 				let src = (x + (y + j) * self.extent.width as usize) * bytes_per_pixel;
-				let dst = (j * w + i * w * h) * bytes_per_pixel;
 
-				data[dst..dst + w * bytes_per_pixel]
-					.copy_from_slice(&self.data[src..src + w * bytes_per_pixel]);
+				data.extend_from_slice(&self.data[src..src + w * bytes_per_pixel]);
 			}
 		}
 

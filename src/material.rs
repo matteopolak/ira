@@ -160,13 +160,11 @@ impl MaterialExt for ira_drum::Material {
 			|h| Handle::new(h.raw()),
 		);
 
-		let albedo = albedo_handle.resolve(&drum.textures.bank).unwrap();
-		let normal = normal_handle.resolve(&drum.textures.bank).unwrap();
-		let metallic_roughness = metallic_roughness_handle
-			.resolve(&drum.textures.bank)
-			.unwrap();
-		let ao = ao_handle.resolve(&drum.textures.bank).unwrap();
-		let emissive = emissive_handle.resolve(&drum.textures.bank).unwrap();
+		let albedo = albedo_handle.resolve(&drum.textures.bank);
+		let normal = normal_handle.resolve(&drum.textures.bank);
+		let metallic_roughness = metallic_roughness_handle.resolve(&drum.textures.bank);
+		let ao = ao_handle.resolve(&drum.textures.bank);
+		let emissive = emissive_handle.resolve(&drum.textures.bank);
 
 		let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
 			entries: &[

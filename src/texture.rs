@@ -23,7 +23,7 @@ impl TextureExt for ira_drum::Texture {
 				usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
 				view_formats: &[],
 			},
-			wgpu::util::TextureDataOrder::MipMajor,
+			wgpu::util::TextureDataOrder::LayerMajor,
 			&self.data,
 		);
 

@@ -5,8 +5,9 @@ use bincode::{
 	Decode, Encode,
 };
 use flate2::{bufread::DeflateDecoder, write::DeflateEncoder, Compression};
+use image_dds::Mipmaps;
 
-use crate::{Handle, Material, Mesh, Vec2, Vec3, Vertex};
+use crate::{Extent3d, Handle, Material, Mesh, Vec2, Vec3, Vertex};
 
 pub const CONFIG: bincode::config::Configuration = bincode::config::standard();
 
@@ -104,22 +105,25 @@ impl Drum {
 	/// # Errors
 	///
 	/// See [`super::material::Texture::compress`] for more information.
-	#[tracing::instrument]
-	pub fn compress_textures(&mut self) -> Result<(), image_dds::error::SurfaceError> {
+	#[tracing::instrument(skip(mipmaps))]
+	pub fn prepare_textures<F>(&mut self, mipmaps: F) -> Result<(), image_dds::error::SurfaceError>
+	where
+		F: Fn(Extent3d) -> Mipmaps + Copy,
+	{
 		for texture in &mut self.textures {
-			texture.compress()?;
+			texture.compress(mipmaps)?;
 		}
 
 		if let Some(brdf_lut) = &mut self.brdf_lut {
-			brdf_lut.compress()?;
+			brdf_lut.compress(mipmaps)?;
 		}
 
 		if let Some(irradiance_map) = &mut self.irradiance_map {
-			irradiance_map.compress()?;
+			irradiance_map.compress(mipmaps)?;
 		}
 
 		if let Some(prefiltered_map) = &mut self.prefiltered_map {
-			prefiltered_map.compress()?;
+			prefiltered_map.compress(mipmaps)?;
 		}
 
 		Ok(())
@@ -225,10 +229,12 @@ impl DrumBuilder {
 		let mut opaque_meshes = Vec::new();
 		let mut transparent_meshes = Vec::new();
 
+		let mut material_handles = Vec::new();
+
 		for material in gltf.materials() {
 			let material = Material::from_gltf_material(self, &material, root)?;
 
-			self.add_material(material);
+			material_handles.push(self.add_material(material));
 		}
 
 		let buffers = gltf
@@ -285,13 +291,13 @@ impl DrumBuilder {
 					.into_u32()
 					.collect();
 
-				let mesh = Mesh {
+				let mesh = Mesh::new(
 					vertices,
 					indices,
-					material: Handle::new(material_index.unwrap_or_default() as u32),
-				};
+					material_handles[material_index.unwrap_or_default()],
+				);
 
-				let transparent = mesh.material.resolve(&self.materials).unwrap().transparent;
+				let transparent = mesh.material.resolve(&self.materials).transparent;
 
 				if transparent {
 					transparent_meshes.push(self.add_mesh(mesh));

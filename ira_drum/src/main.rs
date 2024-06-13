@@ -1,3 +1,4 @@
+use image_dds::Mipmaps;
 use ira_drum::{self, DrumBuilder, Texture};
 
 fn main() {
@@ -10,18 +11,19 @@ fn main() {
 	drum.set_irradiance_map(
 		Texture::from_path("./ibl_irradiance_map.png")
 			.unwrap()
-			.into_cubemap()
+			.into_cubemap(0)
 			.unwrap(),
 	);
 	drum.set_prefiltered_map(
 		Texture::from_path("./ibl_prefilter_map.png")
 			.unwrap()
-			.into_cubemap()
+			.into_cubemap(1)
 			.unwrap(),
 	);
 
 	let mut drum = drum.build();
 
-	drum.compress_textures().unwrap();
+	drum.prepare_textures(|_| Mipmaps::GeneratedAutomatic)
+		.unwrap();
 	drum.write_to_path("./bottled_car.drum").unwrap();
 }

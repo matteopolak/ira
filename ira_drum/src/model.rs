@@ -200,11 +200,14 @@ pub struct MeshBuilder {
 impl MeshBuilder {
 	#[must_use]
 	pub fn build(self) -> Mesh {
-		Mesh {
+		let mut mesh = Mesh {
 			vertices: self.vertices.into_boxed_slice(),
 			indices: self.indices.into_boxed_slice(),
 			material: self.material,
-		}
+		};
+
+		mesh.compute_tangents();
+		mesh
 	}
 }
 
@@ -232,6 +235,18 @@ impl fmt::Debug for Mesh {
 }
 
 impl Mesh {
+	#[must_use]
+	pub fn new(vertices: Box<[Vertex]>, indices: Box<[u32]>, material: Handle<Material>) -> Self {
+		let mut mesh = Self {
+			vertices,
+			indices,
+			material,
+		};
+
+		mesh.compute_tangents();
+		mesh
+	}
+
 	#[tracing::instrument]
 	pub fn compute_tangents(&mut self) {
 		// compute tangents and bitangents
