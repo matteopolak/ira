@@ -7,11 +7,19 @@ use bincode::{
 	BorrowDecode, Decode, Encode,
 };
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug)]
 pub struct Handle<T> {
 	index: u32,
 	phantom: marker::PhantomData<T>,
 }
+
+impl<T> Clone for Handle<T> {
+	fn clone(&self) -> Self {
+		*self
+	}
+}
+
+impl<T> Copy for Handle<T> {}
 
 impl<T> Handle<T> {
 	#[must_use]

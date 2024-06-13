@@ -9,13 +9,17 @@
 
 pub mod app;
 pub mod camera;
+pub mod drum;
 pub mod light;
+pub mod material;
 pub mod model;
 pub mod texture;
 
 pub use app::App;
 pub use camera::*;
+pub use drum::*;
 pub use light::*;
+pub use material::*;
 pub use model::*;
 pub use texture::*;
 
@@ -23,5 +27,3 @@ pub use glam;
 pub use pollster;
 pub use wgpu;
 pub use winit;
-
-mod ext;

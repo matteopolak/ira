@@ -1,15 +1,11 @@
-use std::{fmt, mem, ops::Range, path::Path};
+use std::{mem, ops::Range};
 
 use bytemuck::{Pod, Zeroable};
 use glam::{Mat4, Vec2, Vec3};
-use gltf::Gltf;
 use ira_drum::Handle;
 use wgpu::util::DeviceExt;
 
-use crate::{
-	ext::{GpuDrum, GpuTexture},
-	texture,
-};
+use crate::{GpuDrum, GpuMaterial, GpuMesh};
 
 #[derive(Debug)]
 pub struct Vertex {
@@ -71,14 +67,10 @@ pub struct Meshes {
 impl From<ira_drum::Meshes> for Meshes {
 	fn from(meshes: ira_drum::Meshes) -> Self {
 		Self {
-			opaque: meshes
-				.opaque
-				.into_iter()
-				.map(|h| Handle::new(h.raw()))
-				.collect(),
+			opaque: meshes.opaque.iter().map(|h| Handle::new(h.raw())).collect(),
 			transparent: meshes
 				.transparent
-				.into_iter()
+				.iter()
 				.map(|h| Handle::new(h.raw()))
 				.collect(),
 		}
@@ -146,31 +138,26 @@ impl Instance {
 	}
 }
 
-#[derive(Debug)]
-pub struct GpuMaterial {
-	pub albedo: Handle<GpuTexture>,
-	pub normal: Handle<GpuTexture>,
-	pub metallic_roughness: Handle<GpuTexture>,
-	pub ao: Handle<GpuTexture>,
-	pub emissive: Handle<GpuTexture>,
-
-	pub transparent: bool,
-	pub bind_group: wgpu::BindGroup,
+pub trait ModelExt {
+	fn into_gpu(self, device: &wgpu::Device, instances: &[Instance]) -> GpuModel;
 }
 
-#[derive(Debug)]
-pub struct GpuMesh {
-	pub vertex_buffer: wgpu::Buffer,
-	pub index_buffer: wgpu::Buffer,
-	pub material: Handle<GpuMaterial>,
+impl ModelExt for ira_drum::Model {
+	fn into_gpu(self, device: &wgpu::Device, instances: &[Instance]) -> GpuModel {
+		let instances = instances.iter().map(Instance::to_gpu).collect::<Vec<_>>();
 
-	pub num_indices: u32,
-}
+		let instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+			label: Some("Instance Buffer"),
+			contents: bytemuck::cast_slice(&instances),
+			usage: wgpu::BufferUsages::VERTEX,
+		});
 
-#[derive(Debug)]
-pub struct GpuMeshes {
-	pub opaque: Box<[GpuMesh]>,
-	pub transparent: Box<[GpuMesh]>,
+		GpuModel {
+			meshes: self.meshes.into(),
+			instance_buffer,
+			instances,
+		}
+	}
 }
 
 pub trait DrawModel<'a> {

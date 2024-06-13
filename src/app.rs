@@ -1,9 +1,7 @@
 use crate::{
-	camera,
-	ext::{self, DrumExt, GpuDrum, MaterialExt, ModelExt},
-	light,
+	camera, light,
 	model::{self, DrawModel, Instance},
-	texture,
+	DrumExt, GpuDrum, GpuTexture, MaterialExt,
 };
 
 use std::{sync::Arc, time};
@@ -78,7 +76,7 @@ fn create_render_pipeline(
 			unclipped_depth: false,
 		},
 		depth_stencil: Some(wgpu::DepthStencilState {
-			format: ext::GpuTexture::DEPTH_FORMAT,
+			format: GpuTexture::DEPTH_FORMAT,
 			depth_write_enabled,
 			depth_compare: wgpu::CompareFunction::LessEqual,
 			stencil: wgpu::StencilState::default(),
@@ -107,14 +105,14 @@ pub struct State {
 
 	pub controller: camera::CameraController,
 
-	depth_texture: ext::GpuTexture,
+	depth_texture: GpuTexture,
 
 	lights: light::Lights,
 
 	last_frame: time::Instant,
 	pub sample_count: u32,
 
-	multisampled_texture: ext::GpuTexture,
+	multisampled_texture: GpuTexture,
 
 	drum: GpuDrum,
 }
@@ -256,7 +254,7 @@ impl State {
 		};
 
 		let depth_texture =
-			ext::GpuTexture::create_depth_texture(&device, &config, sample_count, "depth_texture");
+			GpuTexture::create_depth_texture(&device, &config, sample_count, "depth_texture");
 
 		let material_bind_group_layout = Material::create_bind_group_layout(&device);
 		let camera_builder = camera::CameraBuilder::new(config.width as f32, config.height as f32);
@@ -284,8 +282,7 @@ impl State {
 			sample_count,
 		);
 
-		let multisampled_texture =
-			ext::GpuTexture::create_multisampled(&device, &config, sample_count);
+		let multisampled_texture = GpuTexture::create_multisampled(&device, &config, sample_count);
 
 		let drum = drum.into_gpu(&device, &queue);
 
