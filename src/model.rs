@@ -8,7 +8,7 @@ use wgpu::util::DeviceExt;
 
 use crate::{
 	ext::{GpuDrum, GpuTexture},
-	texture::{self, Material},
+	texture,
 };
 
 #[derive(Debug)]

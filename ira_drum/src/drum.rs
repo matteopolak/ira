@@ -6,19 +6,9 @@ use bincode::{
 };
 use flate2::{bufread::DeflateDecoder, write::DeflateEncoder, Compression};
 
-use crate::{Handle, Material, Vec2, Vec3, Vertex};
+use crate::{Handle, Material, Mesh, Vec2, Vec3, Vertex};
 
 pub const CONFIG: bincode::config::Configuration = bincode::config::standard();
-
-pub struct TextureCollection {
-	pub textures: Box<[super::Texture]>,
-
-	/// Default texture for when a texture is missing.
-	pub normal: Option<Handle<super::Texture>>,
-	pub metallic_roughness: Option<Handle<super::Texture>>,
-	pub ao: Option<Handle<super::Texture>>,
-	pub emissive: Option<Handle<super::Texture>>,
-}
 
 #[derive(Debug, Encode, Decode)]
 pub struct Drum {

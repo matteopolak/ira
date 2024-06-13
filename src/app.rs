@@ -1,15 +1,15 @@
 use crate::{
 	camera,
-	ext::{self, DrumExt, GpuDrum, ModelExt},
+	ext::{self, DrumExt, GpuDrum, MaterialExt, ModelExt},
 	light,
 	model::{self, DrawModel, Instance},
-	texture::{self, Material},
+	texture,
 };
 
 use std::{sync::Arc, time};
 
 use glam::Vec3;
-use ira_drum::Drum;
+use ira_drum::{Drum, Material};
 use winit::{
 	application::ApplicationHandler,
 	event::{DeviceEvent, KeyEvent, MouseButton, WindowEvent},
@@ -78,7 +78,7 @@ fn create_render_pipeline(
 			unclipped_depth: false,
 		},
 		depth_stencil: Some(wgpu::DepthStencilState {
-			format: texture::Texture::DEPTH_FORMAT,
+			format: ext::GpuTexture::DEPTH_FORMAT,
 			depth_write_enabled,
 			depth_compare: wgpu::CompareFunction::LessEqual,
 			stencil: wgpu::StencilState::default(),
@@ -107,8 +107,7 @@ pub struct State {
 
 	pub controller: camera::CameraController,
 
-	depth_texture: texture::Texture,
-	pub models: Vec<model::GpuModel>,
+	depth_texture: ext::GpuTexture,
 
 	lights: light::Lights,
 
@@ -257,7 +256,7 @@ impl State {
 		};
 
 		let depth_texture =
-			texture::Texture::create_depth_texture(&device, &config, sample_count, "depth_texture");
+			ext::GpuTexture::create_depth_texture(&device, &config, sample_count, "depth_texture");
 
 		let material_bind_group_layout = Material::create_bind_group_layout(&device);
 		let camera_builder = camera::CameraBuilder::new(config.width as f32, config.height as f32);
@@ -288,11 +287,7 @@ impl State {
 		let multisampled_texture =
 			ext::GpuTexture::create_multisampled(&device, &config, sample_count);
 
-		let models = drum
-			.models
-			.into_iter()
-			.map(|model| model.to_gpu(&device, &[Instance::from_up(Vec3::ZERO, Vec3::Z)]))
-			.collect();
+		let drum = drum.into_gpu(&device, &queue);
 
 		Self {
 			window,
@@ -311,13 +306,13 @@ impl State {
 			controller,
 			depth_texture,
 
-			models,
 			lights,
 
 			last_frame: time::Instant::now(),
 			sample_count,
 
 			multisampled_texture,
+			drum,
 		}
 	}
 
@@ -382,8 +377,9 @@ impl State {
 
 		rpass.set_pipeline(&self.opaque_render_pipeline);
 
-		for model in &self.models {
+		for model in &self.drum.models {
 			rpass.draw_model_instanced(
+				&self.drum,
 				model,
 				&self.controller.camera.bind_group,
 				&self.lights.bind_group,
@@ -418,7 +414,7 @@ impl State {
 
 		rpass.set_pipeline(&self.transparent_render_pipeline);
 
-		for model in &self.models {
+		for model in &self.drum.models {
 			rpass.draw_model_instanced(
 				&self.drum,
 				model,

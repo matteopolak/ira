@@ -10,6 +10,8 @@ pub struct GpuTexture {
 	pub texture: wgpu::Texture,
 	pub view: wgpu::TextureView,
 	pub sampler: wgpu::Sampler,
+
+	view_dimension: wgpu::TextureViewDimension,
 }
 
 impl GpuTexture {
@@ -57,6 +59,7 @@ impl GpuTexture {
 			texture,
 			view,
 			sampler,
+			view_dimension: wgpu::TextureViewDimension::D2,
 		}
 	}
 
@@ -124,6 +127,29 @@ impl GpuTexture {
 			texture,
 			view,
 			sampler,
+			view_dimension: wgpu::TextureViewDimension::D2,
+		}
+	}
+
+	fn view_layout(&self, binding: u32) -> wgpu::BindGroupLayoutEntry {
+		wgpu::BindGroupLayoutEntry {
+			binding,
+			visibility: wgpu::ShaderStages::FRAGMENT,
+			ty: wgpu::BindingType::Texture {
+				sample_type: wgpu::TextureSampleType::Float { filterable: true },
+				multisampled: false,
+				view_dimension: self.view_dimension,
+			},
+			count: None,
+		}
+	}
+
+	fn sampler_layout(&self, binding: u32) -> wgpu::BindGroupLayoutEntry {
+		wgpu::BindGroupLayoutEntry {
+			binding,
+			visibility: wgpu::ShaderStages::FRAGMENT,
+			ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+			count: None,
 		}
 	}
 }
@@ -179,6 +205,7 @@ impl TextureExt for ira_drum::Texture {
 			texture,
 			view,
 			sampler,
+			view_dimension: self.view_dimension(),
 		}
 	}
 
@@ -215,12 +242,28 @@ impl TextureExt for ira_drum::Texture {
 	}
 }
 
-#[derive(Debug)]
+pub struct GpuTextureCollection {
+	pub textures: Vec<GpuTexture>,
+
+	/// Default texture for when a texture is missing.
+	pub normal: Option<Handle<GpuTexture>>,
+	pub metallic_roughness: Option<Handle<GpuTexture>>,
+	pub ao: Option<Handle<GpuTexture>>,
+	pub emissive: Option<Handle<GpuTexture>>,
+}
+
+#[derive(Debug, Default)]
 pub struct GpuDrum {
 	pub textures: Vec<GpuTexture>,
 	pub materials: Vec<GpuMaterial>,
 	pub meshes: Vec<GpuMesh>,
 	pub models: Vec<GpuModel>,
+}
+
+impl GpuDrum {
+	pub fn add_texture(&mut self, texture: GpuTexture) -> Handle<GpuTexture> {
+		Handle::from_vec(&mut self.textures, texture)
+	}
 }
 
 pub trait DrumExt {
@@ -230,29 +273,27 @@ pub trait DrumExt {
 		queue: &wgpu::Queue,
 	) -> (wgpu::BindGroup, wgpu::BindGroupLayout);
 
-	fn to_gpu(&self, device: &wgpu::Device, queue: &wgpu::Queue) -> GpuDrum;
+	fn into_gpu(self, device: &wgpu::Device, queue: &wgpu::Queue) -> GpuDrum;
 }
 
 impl DrumExt for ira_drum::Drum {
-	fn to_gpu(&self, device: &wgpu::Device, queue: &wgpu::Queue) -> GpuDrum {
+	fn into_gpu(self, device: &wgpu::Device, queue: &wgpu::Queue) -> GpuDrum {
+		let mut drum = GpuDrum::default();
+
 		let textures = self
 			.textures
 			.iter()
 			.map(|t| t.to_gpu(device, queue))
 			.collect::<Vec<_>>();
 
-		let materials = self
-			.materials
-			.iter()
-			.map(|m| m.to_gpu(device, &textures))
+		let materials = IntoIterator::into_iter(self.materials)
+			.map(|m| m.into_gpu(device, queue, &mut drum))
 			.collect();
 
 		let meshes = self.meshes.iter().map(|m| m.to_gpu(device)).collect();
 
-		let models = self
-			.models
-			.iter()
-			.map(|m| m.to_gpu(device, self, &[Instance::from_up(Vec3::ZERO, Vec3::Z)]))
+		let models = IntoIterator::into_iter(self.models)
+			.map(|m| m.into_gpu(device, &[Instance::from_up(Vec3::ZERO, Vec3::Z)]))
 			.collect();
 
 		GpuDrum {
@@ -346,39 +387,144 @@ impl ModelExt for ira_drum::Model {
 }
 
 pub trait MaterialExt {
-	fn to_gpu(&self, device: &wgpu::Device, textures: &[GpuTexture]) -> GpuMaterial;
-	fn create_bind_group(
-		&self,
+	fn into_gpu(
+		self,
 		device: &wgpu::Device,
-		drum: &mut DrumBuilder,
-	) -> (wgpu::BindGroup, wgpu::BindGroupLayout);
+		queue: &wgpu::Queue,
+		drum: &mut GpuDrum,
+	) -> GpuMaterial;
+
+	fn create_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout;
 }
 
 impl MaterialExt for ira_drum::Material {
-	fn to_gpu(&self, device: &wgpu::Device, textures: &[GpuTexture]) -> GpuMaterial {}
+	#[must_use]
+	fn create_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+		device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+			entries: &[
+				// Diffuse
+				wgpu::BindGroupLayoutEntry {
+					binding: 0,
+					visibility: wgpu::ShaderStages::FRAGMENT,
+					ty: wgpu::BindingType::Texture {
+						sample_type: wgpu::TextureSampleType::Float { filterable: true },
+						view_dimension: wgpu::TextureViewDimension::D2,
+						multisampled: false,
+					},
+					count: None,
+				},
+				wgpu::BindGroupLayoutEntry {
+					binding: 1,
+					visibility: wgpu::ShaderStages::FRAGMENT,
+					ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+					count: None,
+				},
+				// Normal
+				wgpu::BindGroupLayoutEntry {
+					binding: 2,
+					visibility: wgpu::ShaderStages::FRAGMENT,
+					ty: wgpu::BindingType::Texture {
+						sample_type: wgpu::TextureSampleType::Float { filterable: true },
+						view_dimension: wgpu::TextureViewDimension::D2,
+						multisampled: false,
+					},
+					count: None,
+				},
+				wgpu::BindGroupLayoutEntry {
+					binding: 3,
+					visibility: wgpu::ShaderStages::FRAGMENT,
+					ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+					count: None,
+				},
+				// Metallic + Roughness
+				wgpu::BindGroupLayoutEntry {
+					binding: 4,
+					visibility: wgpu::ShaderStages::FRAGMENT,
+					ty: wgpu::BindingType::Texture {
+						sample_type: wgpu::TextureSampleType::Float { filterable: true },
+						view_dimension: wgpu::TextureViewDimension::D2,
+						multisampled: false,
+					},
+					count: None,
+				},
+				wgpu::BindGroupLayoutEntry {
+					binding: 5,
+					visibility: wgpu::ShaderStages::FRAGMENT,
+					ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+					count: None,
+				},
+				// AO
+				wgpu::BindGroupLayoutEntry {
+					binding: 6,
+					visibility: wgpu::ShaderStages::FRAGMENT,
+					ty: wgpu::BindingType::Texture {
+						sample_type: wgpu::TextureSampleType::Float { filterable: true },
+						view_dimension: wgpu::TextureViewDimension::D2,
+						multisampled: false,
+					},
+					count: None,
+				},
+				wgpu::BindGroupLayoutEntry {
+					binding: 7,
+					visibility: wgpu::ShaderStages::FRAGMENT,
+					ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+					count: None,
+				},
+				// Emissive
+				wgpu::BindGroupLayoutEntry {
+					binding: 8,
+					visibility: wgpu::ShaderStages::FRAGMENT,
+					ty: wgpu::BindingType::Texture {
+						sample_type: wgpu::TextureSampleType::Float { filterable: true },
+						view_dimension: wgpu::TextureViewDimension::D2,
+						multisampled: false,
+					},
+					count: None,
+				},
+				wgpu::BindGroupLayoutEntry {
+					binding: 9,
+					visibility: wgpu::ShaderStages::FRAGMENT,
+					ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+					count: None,
+				},
+			],
+			label: Some("texture_bind_group_layout"),
+		})
+	}
 
-	fn create_bind_group(
-		&self,
+	fn into_gpu(
+		self,
 		device: &wgpu::Device,
-		drum: &mut DrumBuilder,
-	) -> (wgpu::BindGroup, wgpu::BindGroupLayout) {
-		let albedo = self.albedo.resolve(&drum.textures);
-		let normal = self
-			.normal
-			.unwrap_or_else(|| drum.add_texture(ira_drum::Texture::default_normal()))
-			.resolve(&drum.textures);
-		let metallic_roughness = self
-			.metallic_roughness
-			.unwrap_or_else(|| drum.add_texture(ira_drum::Texture::default_metallic_roughness()))
-			.resolve(&drum.textures);
-		let ao = self
-			.ao
-			.unwrap_or_else(|| drum.add_texture(ira_drum::Texture::default_ao()))
-			.resolve(&drum.textures);
-		let emissive = self
-			.emissive
-			.unwrap_or_else(|| drum.add_texture(ira_drum::Texture::default_emissive()))
-			.resolve(&drum.textures);
+		queue: &wgpu::Queue,
+		drum: &mut GpuDrum,
+	) -> GpuMaterial {
+		let albedo_handle = Handle::new(self.albedo.raw());
+		let normal_handle = self.normal.map_or_else(
+			|| drum.add_texture(ira_drum::Texture::default_normal().to_gpu(device, queue)),
+			|h| Handle::new(h.raw()),
+		);
+		let metallic_roughness_handle = self.metallic_roughness.map_or_else(
+			|| {
+				drum.add_texture(
+					ira_drum::Texture::default_metallic_roughness().to_gpu(device, queue),
+				)
+			},
+			|h| Handle::new(h.raw()),
+		);
+		let ao_handle = self.ao.map_or_else(
+			|| drum.add_texture(ira_drum::Texture::default_ao().to_gpu(device, queue)),
+			|h| Handle::new(h.raw()),
+		);
+		let emissive_handle = self.emissive.map_or_else(
+			|| drum.add_texture(ira_drum::Texture::default_emissive().to_gpu(device, queue)),
+			|h| Handle::new(h.raw()),
+		);
+
+		let albedo = albedo_handle.resolve(&drum.textures);
+		let normal = normal_handle.resolve(&drum.textures);
+		let metallic_roughness = metallic_roughness_handle.resolve(&drum.textures);
+		let ao = ao_handle.resolve(&drum.textures);
+		let emissive = emissive_handle.resolve(&drum.textures);
 
 		let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
 			entries: &[
@@ -406,41 +552,58 @@ impl MaterialExt for ira_drum::Material {
 			entries: &[
 				wgpu::BindGroupEntry {
 					binding: 0,
-					resource: wgpu::BindingResource::TextureView(&self.diffuse.view),
+					resource: wgpu::BindingResource::TextureView(&albedo.view),
 				},
 				wgpu::BindGroupEntry {
 					binding: 1,
-					resource: wgpu::BindingResource::Sampler(&self.diffuse.sampler),
+					resource: wgpu::BindingResource::Sampler(&albedo.sampler),
 				},
 				wgpu::BindGroupEntry {
 					binding: 2,
-					resource: wgpu::BindingResource::TextureView(&self.normal.view),
+					resource: wgpu::BindingResource::TextureView(&normal.view),
 				},
 				wgpu::BindGroupEntry {
 					binding: 3,
-					resource: wgpu::BindingResource::Sampler(&self.normal.sampler),
+					resource: wgpu::BindingResource::Sampler(&normal.sampler),
 				},
 				wgpu::BindGroupEntry {
 					binding: 4,
-					resource: wgpu::BindingResource::TextureView(&self.metallic_roughness.view),
+					resource: wgpu::BindingResource::TextureView(&metallic_roughness.view),
 				},
 				wgpu::BindGroupEntry {
 					binding: 5,
-					resource: wgpu::BindingResource::Sampler(&self.metallic_roughness.sampler),
+					resource: wgpu::BindingResource::Sampler(&metallic_roughness.sampler),
 				},
 				wgpu::BindGroupEntry {
 					binding: 6,
-					resource: wgpu::BindingResource::TextureView(&self.ao.view),
+					resource: wgpu::BindingResource::TextureView(&ao.view),
 				},
 				wgpu::BindGroupEntry {
 					binding: 7,
-					resource: wgpu::BindingResource::Sampler(&self.ao.sampler),
+					resource: wgpu::BindingResource::Sampler(&ao.sampler),
+				},
+				wgpu::BindGroupEntry {
+					binding: 8,
+					resource: wgpu::BindingResource::TextureView(&emissive.view),
+				},
+				wgpu::BindGroupEntry {
+					binding: 9,
+					resource: wgpu::BindingResource::Sampler(&emissive.sampler),
 				},
 			],
 			label: None,
 		});
 
-		(bind_group, layout)
+		GpuMaterial {
+			bind_group,
+			albedo: albedo_handle,
+			normal: normal_handle,
+			metallic_roughness: metallic_roughness_handle,
+			ao: ao_handle,
+			emissive: emissive_handle,
+
+			transparent: self.transparent,
+		}
 	}
 }
 
