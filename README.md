@@ -8,26 +8,35 @@ A general-purpose, code-first game engine.
 
 ```rust
 use ira::{glam::Vec3, pollster, winit, App, Instance, Model};
+use ira_drum::Drum;
 
 fn main() -> Result<(), winit::error::EventLoopError> {
-  let app = App::new(|state| {
-    pollster::block_on(async {
-      let gpu_model = Model::from_path(
-        "models/bottled_car/scene.gltf",
-        &state.device,
-        &state.queue,
-        &state.material_bind_group_layout,
-      )
-      .await
+  let mut drum = DrumBuilder::default();
+  let gltf = gltf::Gltf::open("models/bottled_car/scene.gltf").unwrap();
+
+  drum.add_gltf(&gltf, "models/bottled_car".as_ref()).unwrap();
+
+  drum.set_brdf_lut(Texture::from_path("./ibl_brdf_lut.png").unwrap());
+  drum.set_irradiance_map(
+    Texture::from_path("./ibl_irradiance_map.png")
       .unwrap()
-      .with_instance(Instance::from_up(Vec3::ZERO, Vec3::Z))
-      .into_gpu(&state.device);
+      .into_cubemap()
+      .unwrap(),
+  );
 
-      state.models.push(gpu_model);
-    });
+  drum.set_prefiltered_map(
+    Texture::from_path("./ibl_prefilter_map.png")
+      .unwrap()
+      .into_cubemap()
+      .unwrap(),
+  );
 
-    state.controller.camera.recreate_bind_group(&state.device);
-  });
+  let mut drum = drum.build();
+
+  drum.prepare_textures(|_| Mipmaps::GeneratedAutomatic)
+    .unwrap();
+
+  let app = App::new(|_window| drum);
 
   app.run()
 }

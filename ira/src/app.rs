@@ -153,7 +153,10 @@ fn create_pbr_render_pipelines(
 	lights: &light::Lights,
 	sample_count: u32,
 ) -> (wgpu::RenderPipeline, wgpu::RenderPipeline) {
-	let shader = device.create_shader_module(wgpu::include_wgsl!("../shaders/pbr.wgsl"));
+	let shader = device.create_shader_module(wgpu::include_wgsl!(concat!(
+		env!("CARGO_MANIFEST_DIR"),
+		"/shaders/pbr.wgsl"
+	)));
 
 	let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
 		label: None,

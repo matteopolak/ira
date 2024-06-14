@@ -1,4 +1,4 @@
-use std::{fmt, fs, io, path::Path};
+use std::{fmt, path::Path};
 
 use bincode::{Decode, Encode};
 use image::{buffer::ConvertBuffer, DynamicImage};

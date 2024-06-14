@@ -1,0 +1,22 @@
+[package]
+name = "ira"
+version = "0.0.4"
+edition = "2021"
+authors = ["Matthew Polak <git@matteopolak.com>"]
+description = "A general-purpose, code-first game engine."
+license = "MIT"
+
+[dependencies]
+ira_drum.path = "../ira_drum"
+anyhow = "1"
+bytemuck = { version = "1", features = ["derive"] }
+env_logger = "0.11"
+glam = "0.28"
+gltf = { version = "1", features = ["import"] }
+image = "0.25"
+log = "0.4"
+pollster = "0.3"
+tobj = { version = "4", features = ["async"] }
+wgpu = "0.20"
+winit = "0.30"
+

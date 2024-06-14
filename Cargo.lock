@@ -235,6 +235,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9e1b586273c5702936fe7b7d6896644d8be71e6314cfe09d3167c95f712589e8"
 
 [[package]]
+name = "basic"
+version = "0.0.0"
+dependencies = [
+ "ira",
+ "ira_drum",
+]
+
+[[package]]
 name = "bcdec_rs"
 version = "0.1.1"
 source = "git+https://github.com/matteopolak/image_dds.git#a02558a6895335ed2bc00f32c0964448f6a43f64"
@@ -1089,7 +1097,7 @@ dependencies = [
 
 [[package]]
 name = "ira"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "anyhow",
  "bytemuck",
@@ -1107,7 +1115,7 @@ dependencies = [
 
 [[package]]
 name = "ira_drum"
-version = "0.1.0"
+version = "0.0.2"
 dependencies = [
  "bincode",
  "bytemuck",

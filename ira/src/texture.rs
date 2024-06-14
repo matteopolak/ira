@@ -271,6 +271,7 @@ impl GpuTexture {
 		}
 	}
 
+	#[must_use]
 	pub fn view_layout(&self, binding: u32) -> wgpu::BindGroupLayoutEntry {
 		wgpu::BindGroupLayoutEntry {
 			binding,
@@ -284,6 +285,7 @@ impl GpuTexture {
 		}
 	}
 
+	#[must_use]
 	pub fn sampler_layout(&self, binding: u32) -> wgpu::BindGroupLayoutEntry {
 		wgpu::BindGroupLayoutEntry {
 			binding,

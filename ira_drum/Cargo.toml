@@ -1,6 +1,6 @@
 [package]
 name = "ira_drum"
-version = "0.1.0"
+version = "0.0.2"
 edition = "2021"
 description = "A packaging format for textures and models."
 
@@ -36,3 +36,4 @@ wgpu = ["dep:wgpu"]
 bytemuck = ["dep:bytemuck"]
 glam = ["dep:glam"]
 gltf = ["dep:gltf"]
+
