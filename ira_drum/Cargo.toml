@@ -1,7 +1,9 @@
 [package]
 name = "ira_drum"
-version = "0.0.2"
+version = "0.0.5"
 edition = "2021"
+license = "MIT"
+authors = ["Matthew Polak <git@matteopolak.com>"]
 description = "A packaging format for textures and models."
 
 [dependencies]
@@ -9,6 +11,7 @@ bincode = "2.0.0-rc.3"
 flate2 = "1"
 image = "0.25"
 tracing = "0.1"
+thiserror = "1"
 
 [dependencies.image_dds]
 git = "https://github.com/matteopolak/image_dds.git"
@@ -16,7 +19,6 @@ git = "https://github.com/matteopolak/image_dds.git"
 [dependencies.bytemuck]
 version = "1"
 features = ["derive"]
-optional = true
 
 [dependencies.glam]
 version = "0.28"
@@ -31,9 +33,8 @@ version = "0.20"
 optional = true
 
 [features]
-default = ["wgpu", "bytemuck", "gltf", "glam"]
+default = ["wgpu", "gltf", "glam"]
 wgpu = ["dep:wgpu"]
-bytemuck = ["dep:bytemuck"]
 glam = ["dep:glam"]
 gltf = ["dep:gltf"]
 

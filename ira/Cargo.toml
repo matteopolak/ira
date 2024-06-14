@@ -1,10 +1,10 @@
 [package]
 name = "ira"
-version = "0.0.4"
+version = "0.0.5"
 edition = "2021"
+license = "MIT"
 authors = ["Matthew Polak <git@matteopolak.com>"]
 description = "A general-purpose, code-first game engine."
-license = "MIT"
 
 [dependencies]
 ira_drum.path = "../ira_drum"

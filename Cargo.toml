@@ -1,4 +1,4 @@
 [workspace]
-members = ["ira", "ira_drum", "examples/*"]
+members = ["ira", "ira_cli", "ira_drum", "examples/*", "ira_cli"]
 resolver = "2"
 

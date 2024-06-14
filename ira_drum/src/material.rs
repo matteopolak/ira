@@ -3,6 +3,7 @@ use std::{fmt, path::Path};
 use bincode::{Decode, Encode};
 use image::{buffer::ConvertBuffer, DynamicImage};
 use image_dds::{Mipmaps, Surface};
+use thiserror::Error;
 
 use crate::{handle::Handle, DrumBuilder};
 
@@ -361,16 +362,25 @@ impl Texture {
 		Self::from_r_pixel(pixel)
 	}
 
-	/// Compresses the texture using `BCn` if possible.
+	/// Processes the texture by (optionally) compressing it and generating mipmaps.
 	///
 	/// # Errors
 	///
 	/// See [`image_dds::SurfaceRgba8::encode`].
 	#[tracing::instrument(skip(mipmaps))]
-	pub fn compress<F>(&mut self, mipmaps: F) -> Result<(), image_dds::error::SurfaceError>
+	pub fn process<F>(
+		&mut self,
+		compress: bool,
+		srgb: bool,
+		mipmaps: F,
+	) -> Result<(), image_dds::error::SurfaceError>
 	where
 		F: Fn(Extent3d) -> Mipmaps,
 	{
+		if srgb {
+			self.format = self.format.to_srgb();
+		}
+
 		let Some(format) = self.format.to_compressed() else {
 			return Ok(());
 		};
@@ -405,6 +415,12 @@ impl Texture {
 
 		Ok(())
 	}
+}
+
+#[derive(Debug, Error)]
+pub enum CubemapError {
+	#[error("invalid cubemap dimensions")]
+	InvalidDimensions,
 }
 
 #[cfg(feature = "gltf")]
@@ -502,7 +518,7 @@ impl Texture {
 	///
 	/// Returns an error if the input texture does not have the correct dimensions.
 	#[tracing::instrument]
-	pub fn into_cubemap(self, n: u32) -> Result<Self, ()> {
+	pub fn into_cubemap(self) -> Result<Self, CubemapError> {
 		const TOP_LEFT_SIDE_CROSS: [(usize, usize); 6] = [
 			(2, 1), // +X
 			(0, 1), // -X
@@ -558,7 +574,7 @@ impl Texture {
 		else if w / 6 == h {
 			(TOP_LEFT_LINE, h, h)
 		} else {
-			return Err(());
+			return Err(CubemapError::InvalidDimensions);
 		};
 
 		let (w, h) = (w as usize, h as usize);

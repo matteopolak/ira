@@ -1,15 +1,13 @@
 use std::{fmt, ops};
 
 use bincode::{Decode, Encode};
-#[cfg(feature = "bytemuck")]
 use bytemuck::{Pod, Zeroable};
 
 use crate::{handle::Handle, material::Material};
 
 #[must_use]
 #[repr(C)]
-#[derive(Clone, Copy, Debug, Encode, Decode)]
-#[cfg_attr(feature = "bytemuck", derive(Zeroable, Pod))]
+#[derive(Clone, Copy, Debug, Encode, Decode, Zeroable, Pod)]
 pub struct Vec3 {
 	pub x: f32,
 	pub y: f32,
@@ -120,8 +118,7 @@ impl ops::Div<f32> for Vec3 {
 
 #[must_use]
 #[repr(C)]
-#[derive(Clone, Copy, Debug, Encode, Decode, PartialEq)]
-#[cfg_attr(feature = "bytemuck", derive(Zeroable, Pod))]
+#[derive(Clone, Copy, Debug, Encode, Decode, PartialEq, Zeroable, Pod)]
 pub struct Vec2 {
 	pub x: f32,
 	pub y: f32,
@@ -168,8 +165,7 @@ impl ops::Sub for Vec2 {
 }
 
 #[repr(C)]
-#[derive(Clone, Copy, Debug, Encode, Decode)]
-#[cfg_attr(feature = "bytemuck", derive(Zeroable, Pod))]
+#[derive(Clone, Copy, Debug, Encode, Decode, Zeroable, Pod)]
 pub struct Vertex {
 	pub position: Vec3,
 	pub normal: Vec3,

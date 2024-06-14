@@ -100,30 +100,35 @@ impl Drum {
 		self.write(&mut file)
 	}
 
-	/// Compressed all textures in the drum (where applicable).
+	/// Compresses and/or generates mipmaps for all textures in the drum.
 	///
 	/// # Errors
 	///
 	/// See [`super::material::Texture::compress`] for more information.
 	#[tracing::instrument(skip(mipmaps))]
-	pub fn prepare_textures<F>(&mut self, mipmaps: F) -> Result<(), image_dds::error::SurfaceError>
+	pub fn prepare_textures<F>(
+		&mut self,
+		compress: bool,
+		srgb: bool,
+		mipmaps: F,
+	) -> Result<(), image_dds::error::SurfaceError>
 	where
 		F: Fn(Extent3d) -> Mipmaps + Copy,
 	{
 		for texture in &mut self.textures {
-			texture.compress(mipmaps)?;
+			texture.process(compress, srgb, mipmaps)?;
 		}
 
 		if let Some(brdf_lut) = &mut self.brdf_lut {
-			brdf_lut.compress(mipmaps)?;
+			brdf_lut.process(compress, srgb, mipmaps)?;
 		}
 
 		if let Some(irradiance_map) = &mut self.irradiance_map {
-			irradiance_map.compress(mipmaps)?;
+			irradiance_map.process(compress, srgb, mipmaps)?;
 		}
 
 		if let Some(prefiltered_map) = &mut self.prefiltered_map {
-			prefiltered_map.compress(mipmaps)?;
+			prefiltered_map.process(compress, srgb, mipmaps)?;
 		}
 
 		Ok(())

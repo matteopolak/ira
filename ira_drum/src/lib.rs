@@ -24,6 +24,10 @@
 #![allow(clippy::cast_sign_loss)]
 #![allow(clippy::cast_precision_loss)]
 
+#[cfg(feature = "gltf")]
+pub use gltf;
+pub use image_dds::Mipmaps;
+
 pub mod drum;
 pub mod handle;
 pub mod light;
