@@ -16,7 +16,7 @@ tracing = "0.1"
 tracing-subscriber = "0.3"
 
 [dependencies.ira_drum]
-path = "../ira_drum"
+version = "0.0.6"
 default-features = false
 features = ["gltf", "obj"]
 

@@ -7,7 +7,7 @@ authors = ["Matthew Polak <git@matteopolak.com>"]
 description = "A general-purpose, code-first game engine."
 
 [dependencies]
-ira_drum.path = "../ira_drum"
+ira_drum = "0.0.6"
 anyhow = "1"
 bytemuck = { version = "1", features = ["derive"] }
 env_logger = "0.11"
