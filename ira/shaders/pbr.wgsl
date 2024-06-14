@@ -86,11 +86,12 @@ fn vs_main(model: VertexInput, instance: InstanceInput) -> VertexOutput {
 @group(0) @binding(2) var t_normal: texture_2d<f32>;
 @group(0) @binding(3) var s_normal: sampler;
 
-@group(0) @binding(4) var t_metallic_roughness: texture_2d<f32>;
-@group(0) @binding(5) var s_metallic_roughness: sampler;
+@group(0) @binding(4) var t_orm: texture_2d<f32>;
+@group(0) @binding(5) var s_orm: sampler;
 
-@group(0) @binding(6) var t_ao: texture_2d<f32>;
-@group(0) @binding(7) var s_ao: sampler;
+// TODO: use these
+@group(0) @binding(6) var t_emission: texture_2d<f32>;
+@group(0) @binding(7) var s_emission: sampler;
 
 @group(3) @binding(0) var t_brdf_lut: texture_2d<f32>;
 @group(3) @binding(1) var s_brdf_lut: sampler;
@@ -149,12 +150,11 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 	let albedo_raw = textureSample(t_diffuse, s_diffuse, in.tex_coords);
 	let albedo = pow(albedo_raw.rgb, vec3<f32>(2.2));
 	let normal_map = textureSample(t_normal, s_normal, in.tex_coords).rgb;
-	let ao = textureSample(t_ao, s_ao, in.tex_coords).r;
 
-	let metallic_roughness = textureSample(t_metallic_roughness, s_metallic_roughness, in.tex_coords);
-	// Normally this is in B, but we're using R due to how the texture is packed
-	let metallic = metallic_roughness.r;
-	let roughness = metallic_roughness.g;
+	let orm = textureSample(t_orm, s_orm, in.tex_coords);
+	let ao = orm.r;
+	let roughness = orm.g;
+	let metallic = orm.b;
 
 	let tbn = mat3x3<f32>(
 		in.tbn_matrix_0,

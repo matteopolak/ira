@@ -7,7 +7,7 @@ use bincode::{
 use flate2::{bufread::DeflateDecoder, write::DeflateEncoder, Compression};
 use image_dds::Mipmaps;
 
-use crate::{Extent3d, Handle, Material, Mesh, Vec2, Vec3, Vertex};
+use crate::{source::Source, Extent3d, Handle};
 
 pub const CONFIG: bincode::config::Configuration = bincode::config::standard();
 
@@ -211,119 +211,25 @@ impl DrumBuilder {
 
 #[cfg(feature = "gltf")]
 impl DrumBuilder {
-	/// Creates a new [`DrumBuilder`] from a glTF file.
+	/// Creates a new drum from a supported source.
 	///
 	/// # Errors
 	///
-	/// See [`Self::extend_from_gltf`].
-	pub fn from_gltf(gltf: &gltf::Gltf, root: &Path) -> gltf::Result<Self> {
-		let mut drum = DrumBuilder::default();
+	/// See [`Source::add_to_drum`] for more information.
+	pub fn from_source<S: Source>(source: S) -> Result<Self, S::Error> {
+		let mut drum = Self::default();
 
-		drum.add_gltf(gltf, root)?;
+		drum.add(source)?;
+
 		Ok(drum)
 	}
 
-	/// Extends the [`DrumBuilder`] with the contents of a glTF file.
+	/// Adds a supported source to the drum.
 	///
 	/// # Errors
 	///
-	/// See [`gltf::Error`] for more information.
-	///
-	/// If a mesh does not contain normals, tex coords, or indices, a [`gltf::Error::MissingBlob`] will be returned.
-	pub fn add_gltf(&mut self, gltf: &gltf::Gltf, root: &Path) -> gltf::Result<()> {
-		let mut opaque_meshes = Vec::new();
-		let mut transparent_meshes = Vec::new();
-
-		let mut material_handles = Vec::new();
-
-		for material in gltf.materials() {
-			let material = Material::from_gltf_material(self, &material, root)?;
-
-			material_handles.push(self.add_material(material));
-		}
-
-		let buffers = gltf
-			.buffers()
-			.map(|b| {
-				let data = gltf::buffer::Data::from_source(b.source(), Some(root))?;
-
-				Ok(data.0)
-			})
-			.collect::<gltf::Result<Vec<_>>>()?;
-
-		let mut centroid = Vec3::ZERO;
-		let mut num_vertices = 0;
-
-		for mesh in gltf.meshes() {
-			for primitive in mesh.primitives() {
-				let reader = primitive.reader(|buffer| Some(&buffers[buffer.index()]));
-
-				let material_index = primitive.material().index();
-
-				let positions = reader.read_positions().ok_or(gltf::Error::MissingBlob)?;
-				let normals = reader.read_normals().ok_or(gltf::Error::MissingBlob)?;
-				let tex_coords = reader.read_tex_coords(0);
-
-				let vertices = positions.zip(normals);
-				let vertices: Box<[Vertex]> = if let Some(tex_coords) = tex_coords {
-					vertices
-						.zip(tex_coords.into_f32())
-						.map(|((position, normal), tex_coord)| {
-							centroid += Vec3::from(position);
-
-							Vertex::new(
-								position.into(),
-								normal.into(),
-								tex_coord.map(f32::fract).into(),
-							)
-						})
-						.collect()
-				} else {
-					vertices
-						.map(|(position, normal)| {
-							centroid += Vec3::from(position);
-
-							Vertex::new(position.into(), normal.into(), Vec2::ZERO)
-						})
-						.collect()
-				};
-
-				num_vertices += vertices.len();
-
-				let indices = reader
-					.read_indices()
-					.ok_or(gltf::Error::MissingBlob)?
-					.into_u32()
-					.collect();
-
-				let mesh = Mesh::new(
-					vertices,
-					indices,
-					material_handles[material_index.unwrap_or_default()],
-				);
-
-				let transparent = mesh.material.resolve(&self.materials).transparent;
-
-				if transparent {
-					transparent_meshes.push(self.add_mesh(mesh));
-				} else {
-					opaque_meshes.push(self.add_mesh(mesh));
-				}
-			}
-		}
-
-		centroid /= num_vertices as f32;
-
-		let model = super::Model {
-			meshes: crate::Meshes {
-				opaque: opaque_meshes.into_boxed_slice(),
-				transparent: transparent_meshes.into_boxed_slice(),
-			},
-			center: centroid,
-		};
-
-		self.add_model(model);
-
-		Ok(())
+	/// See [`Source::add_to_drum`] for more information.
+	pub fn add<S: Source>(&mut self, source: S) -> Result<(), S::Error> {
+		source.add_to_drum(self)
 	}
 }

@@ -1,9 +1,13 @@
 [package]
 name = "ira_cli"
-version = "0.0.5"
+version = "0.0.6"
 edition = "2021"
 license = "MIT"
 description = "Command line interface for preparing assets for Ira."
+
+[[bin]]
+name = "ira"
+path = "src/main.rs"
 
 [dependencies]
 anyhow = "1"
@@ -14,5 +18,5 @@ tracing-subscriber = "0.3"
 [dependencies.ira_drum]
 path = "../ira_drum"
 default-features = false
-features = ["gltf"]
+features = ["gltf", "obj"]
 

@@ -86,16 +86,16 @@ fn pack(
 			continue;
 		};
 
-		let Some(root) = asset.parent() else {
-			warn!(path = %asset.display(), "skipping asset without parent directory");
-			continue;
-		};
-
 		match ext.to_str() {
 			Some("gltf") => {
-				let gltf = ira_drum::gltf::Gltf::open(&asset)?;
+				let gltf = ira_drum::GltfSource::from_path(&asset)?;
 
-				drum.add_gltf(&gltf, root)?;
+				drum.add(gltf)?;
+			}
+			Some("obj") => {
+				let obj = ira_drum::ObjSource::from_path(&asset)?;
+
+				drum.add(obj)?;
 			}
 			_ => {
 				warn!(path = %asset.display(), "skipping unsupported asset");

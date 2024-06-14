@@ -1,6 +1,6 @@
 [package]
 name = "ira_drum"
-version = "0.0.5"
+version = "0.0.6"
 edition = "2021"
 license = "MIT"
 authors = ["Matthew Polak <git@matteopolak.com>"]
@@ -14,7 +14,8 @@ tracing = "0.1"
 thiserror = "1"
 
 [dependencies.image_dds]
-git = "https://github.com/matteopolak/image_dds.git"
+package = "image_dds__patch"
+version = "0.5"
 
 [dependencies.bytemuck]
 version = "1"
@@ -28,12 +29,18 @@ optional = true
 version = "1"
 optional = true
 
+[dependencies.tobj]
+version = "4"
+features = ["async"]
+optional = true
+
 [dependencies.wgpu]
 version = "0.20"
 optional = true
 
 [features]
-default = ["wgpu", "gltf", "glam"]
+default = ["wgpu", "gltf", "glam", "obj"]
+obj = ["dep:tobj"]
 wgpu = ["dep:wgpu"]
 glam = ["dep:glam"]
 gltf = ["dep:gltf"]

@@ -245,7 +245,8 @@ dependencies = [
 [[package]]
 name = "bcdec_rs"
 version = "0.1.1"
-source = "git+https://github.com/matteopolak/image_dds.git#a02558a6895335ed2bc00f32c0964448f6a43f64"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "78380141caa5a36218290ebf720f233b70b3c782d577d236b2271820e5308150"
 
 [[package]]
 name = "bincode"
@@ -1079,9 +1080,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "image_dds"
+name = "image_dds__patch"
 version = "0.5.1"
-source = "git+https://github.com/matteopolak/image_dds.git#a02558a6895335ed2bc00f32c0964448f6a43f64"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5ba3c8b18e27192acca8cd73b478698cb7d308856dd61dba9239e3f09a0cc426"
 dependencies = [
  "bcdec_rs",
  "bytemuck",
@@ -1137,7 +1139,7 @@ dependencies = [
 
 [[package]]
 name = "ira"
-version = "0.0.5"
+version = "0.0.6"
 dependencies = [
  "anyhow",
  "bytemuck",
@@ -1148,14 +1150,13 @@ dependencies = [
  "ira_drum",
  "log",
  "pollster",
- "tobj",
  "wgpu",
  "winit",
 ]
 
 [[package]]
 name = "ira_cli"
-version = "0.0.5"
+version = "0.0.6"
 dependencies = [
  "anyhow",
  "clap",
@@ -1166,7 +1167,7 @@ dependencies = [
 
 [[package]]
 name = "ira_drum"
-version = "0.0.5"
+version = "0.0.6"
 dependencies = [
  "bincode",
  "bytemuck",
@@ -1174,8 +1175,9 @@ dependencies = [
  "glam",
  "gltf",
  "image",
- "image_dds",
+ "image_dds__patch",
  "thiserror",
+ "tobj",
  "tracing",
  "wgpu",
 ]

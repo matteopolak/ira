@@ -22,8 +22,7 @@ pub struct GpuMeshes {
 pub struct GpuMaterial {
 	pub albedo: Handle<GpuTexture>,
 	pub normal: Handle<GpuTexture>,
-	pub metallic_roughness: Handle<GpuTexture>,
-	pub ao: Handle<GpuTexture>,
+	pub orm: Handle<GpuTexture>,
 	pub emissive: Handle<GpuTexture>,
 
 	pub transparent: bool,
@@ -46,7 +45,7 @@ impl MaterialExt for ira_drum::Material {
 	fn create_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
 		device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
 			entries: &[
-				// Diffuse
+				// diffuse
 				wgpu::BindGroupLayoutEntry {
 					binding: 0,
 					visibility: wgpu::ShaderStages::FRAGMENT,
@@ -63,7 +62,7 @@ impl MaterialExt for ira_drum::Material {
 					ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
 					count: None,
 				},
-				// Normal
+				// normal
 				wgpu::BindGroupLayoutEntry {
 					binding: 2,
 					visibility: wgpu::ShaderStages::FRAGMENT,
@@ -80,7 +79,7 @@ impl MaterialExt for ira_drum::Material {
 					ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
 					count: None,
 				},
-				// Metallic + Roughness
+				// ao + roughness + metallic
 				wgpu::BindGroupLayoutEntry {
 					binding: 4,
 					visibility: wgpu::ShaderStages::FRAGMENT,
@@ -97,7 +96,7 @@ impl MaterialExt for ira_drum::Material {
 					ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
 					count: None,
 				},
-				// AO
+				// emissive
 				wgpu::BindGroupLayoutEntry {
 					binding: 6,
 					visibility: wgpu::ShaderStages::FRAGMENT,
@@ -110,23 +109,6 @@ impl MaterialExt for ira_drum::Material {
 				},
 				wgpu::BindGroupLayoutEntry {
 					binding: 7,
-					visibility: wgpu::ShaderStages::FRAGMENT,
-					ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-					count: None,
-				},
-				// Emissive
-				wgpu::BindGroupLayoutEntry {
-					binding: 8,
-					visibility: wgpu::ShaderStages::FRAGMENT,
-					ty: wgpu::BindingType::Texture {
-						sample_type: wgpu::TextureSampleType::Float { filterable: true },
-						view_dimension: wgpu::TextureViewDimension::D2,
-						multisampled: false,
-					},
-					count: None,
-				},
-				wgpu::BindGroupLayoutEntry {
-					binding: 9,
 					visibility: wgpu::ShaderStages::FRAGMENT,
 					ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
 					count: None,
@@ -147,12 +129,8 @@ impl MaterialExt for ira_drum::Material {
 			|| drum.textures.default_normal(device, queue),
 			|h| Handle::new(h.raw()),
 		);
-		let metallic_roughness_handle = self.metallic_roughness.map_or_else(
-			|| drum.textures.default_metallic_roughness(device, queue),
-			|h| Handle::new(h.raw()),
-		);
-		let ao_handle = self.ao.map_or_else(
-			|| drum.textures.default_ao(device, queue),
+		let orm_handle = self.orm.map_or_else(
+			|| drum.textures.default_orm(device, queue),
 			|h| Handle::new(h.raw()),
 		);
 		let emissive_handle = self.emissive.map_or_else(
@@ -162,8 +140,7 @@ impl MaterialExt for ira_drum::Material {
 
 		let albedo = albedo_handle.resolve(&drum.textures.bank);
 		let normal = normal_handle.resolve(&drum.textures.bank);
-		let metallic_roughness = metallic_roughness_handle.resolve(&drum.textures.bank);
-		let ao = ao_handle.resolve(&drum.textures.bank);
+		let orm = orm_handle.resolve(&drum.textures.bank);
 		let emissive = emissive_handle.resolve(&drum.textures.bank);
 
 		let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -174,15 +151,12 @@ impl MaterialExt for ira_drum::Material {
 				// normal
 				normal.view_layout(2),
 				normal.sampler_layout(3),
-				// metallic + roughness
-				metallic_roughness.view_layout(4),
-				metallic_roughness.sampler_layout(5),
-				// ao
-				ao.view_layout(6),
-				ao.sampler_layout(7),
+				// ao + roughness + metallic
+				orm.view_layout(4),
+				orm.sampler_layout(5),
 				// emissive
-				emissive.view_layout(8),
-				emissive.sampler_layout(9),
+				emissive.view_layout(6),
+				emissive.sampler_layout(7),
 			],
 			label: None,
 		});
@@ -208,26 +182,18 @@ impl MaterialExt for ira_drum::Material {
 				},
 				wgpu::BindGroupEntry {
 					binding: 4,
-					resource: wgpu::BindingResource::TextureView(&metallic_roughness.view),
+					resource: wgpu::BindingResource::TextureView(&orm.view),
 				},
 				wgpu::BindGroupEntry {
 					binding: 5,
-					resource: wgpu::BindingResource::Sampler(&metallic_roughness.sampler),
+					resource: wgpu::BindingResource::Sampler(&orm.sampler),
 				},
 				wgpu::BindGroupEntry {
 					binding: 6,
-					resource: wgpu::BindingResource::TextureView(&ao.view),
-				},
-				wgpu::BindGroupEntry {
-					binding: 7,
-					resource: wgpu::BindingResource::Sampler(&ao.sampler),
-				},
-				wgpu::BindGroupEntry {
-					binding: 8,
 					resource: wgpu::BindingResource::TextureView(&emissive.view),
 				},
 				wgpu::BindGroupEntry {
-					binding: 9,
+					binding: 7,
 					resource: wgpu::BindingResource::Sampler(&emissive.sampler),
 				},
 			],
@@ -238,8 +204,7 @@ impl MaterialExt for ira_drum::Material {
 			bind_group,
 			albedo: albedo_handle,
 			normal: normal_handle,
-			metallic_roughness: metallic_roughness_handle,
-			ao: ao_handle,
+			orm: orm_handle,
 			emissive: emissive_handle,
 
 			transparent: self.transparent,

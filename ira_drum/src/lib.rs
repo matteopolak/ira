@@ -26,6 +26,10 @@
 
 #[cfg(feature = "gltf")]
 pub use gltf;
+
+#[cfg(feature = "obj")]
+pub use tobj;
+
 pub use image_dds::Mipmaps;
 
 pub mod drum;
@@ -33,9 +37,11 @@ pub mod handle;
 pub mod light;
 pub mod material;
 pub mod model;
+pub mod source;
 
 pub use drum::*;
 pub use handle::*;
 pub use light::*;
 pub use material::*;
 pub use model::*;
+pub use source::*;

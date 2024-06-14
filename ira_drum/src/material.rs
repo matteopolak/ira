@@ -258,14 +258,8 @@ impl Texture {
 
 	#[must_use]
 	#[inline]
-	pub fn default_metallic_roughness() -> Self {
-		Self::from_rgba_pixel([128, 128, 255, 255])
-	}
-
-	#[must_use]
-	#[inline]
-	pub fn default_ao() -> Self {
-		Self::from_r_pixel(255)
+	pub fn default_orm() -> Self {
+		Self::from_rgba_pixel([255, 128, 128, 255])
 	}
 
 	#[must_use]
@@ -423,36 +417,7 @@ pub enum CubemapError {
 	InvalidDimensions,
 }
 
-#[cfg(feature = "gltf")]
 impl Texture {
-	#[must_use]
-	#[tracing::instrument]
-	pub fn from_gltf_data(data: gltf::image::Data) -> Self {
-		use image::buffer::ConvertBuffer;
-
-		let extent = Extent3d::from_wh(data.width, data.height);
-
-		let (data, format) = match data.format.try_into() {
-			Ok(format) => (data.pixels, format),
-			Err(..) if data.format == gltf::image::Format::R8G8B8 => {
-				let image: image::RgbaImage =
-					image::RgbImage::from_vec(data.width, data.height, data.pixels)
-						.expect("invalid image data")
-						.convert();
-
-				(image.into_raw(), Format::Rgb8A8Unorm)
-			}
-			Err(..) => panic!("unsupported image format"),
-		};
-
-		Self {
-			extent,
-			format,
-			mipmaps: 1,
-			data: data.into_boxed_slice(),
-		}
-	}
-
 	/// Loads a texture from a file.
 	///
 	/// # Errors
@@ -605,89 +570,8 @@ impl Texture {
 pub struct Material {
 	pub albedo: Handle<Texture>,
 	pub normal: Option<Handle<Texture>>,
-	pub metallic_roughness: Option<Handle<Texture>>,
-	pub ao: Option<Handle<Texture>>,
+	pub orm: Option<Handle<Texture>>,
 	pub emissive: Option<Handle<Texture>>,
 
 	pub transparent: bool,
-}
-
-#[cfg(feature = "gltf")]
-impl Material {
-	/// Creates a new material from a glTF material.
-	///
-	/// # Errors
-	///
-	/// Returns an error if the material's textures cannot be loaded.
-	/// See [`gltf::image::Data::from_source`] for more information.
-	#[tracing::instrument]
-	pub fn from_gltf_material(
-		drum: &mut DrumBuilder,
-		material: &gltf::Material<'_>,
-		root: &Path,
-	) -> Result<Self, gltf::Error> {
-		let albedo_texture = material
-			.pbr_metallic_roughness()
-			.base_color_texture()
-			.map(|t| t.texture().source())
-			.map(|s| gltf::image::Data::from_source(s.source(), Some(root), &[]))
-			.transpose()?;
-
-		let albedo_colour = material.pbr_metallic_roughness().base_color_factor();
-		let albedo = albedo_texture.map_or_else(
-			|| Texture::from_rgba_pixel_f32(albedo_colour),
-			Texture::from_gltf_data,
-		);
-
-		let normal = material
-			.normal_texture()
-			.map(|t| t.texture().source())
-			.map(|s| gltf::image::Data::from_source(s.source(), Some(root), &[]))
-			.transpose()?
-			.map(Texture::from_gltf_data);
-
-		let metallic_roughness = material.pbr_metallic_roughness();
-		let metallic_factor = metallic_roughness.metallic_factor();
-		let roughness_factor = metallic_roughness.roughness_factor();
-
-		let metallic_roughness = metallic_roughness
-			.metallic_roughness_texture()
-			.map(|t| t.texture().source())
-			.map(|s| gltf::image::Data::from_source(s.source(), Some(root), &[]))
-			.transpose()?;
-
-		// roughness = G
-		// metallic = B (will be written to R)
-		let metallic_roughness = metallic_roughness.map_or_else(
-			|| Texture::from_rg_pixel_f32([metallic_factor, roughness_factor]),
-			Texture::from_gltf_data,
-		);
-
-		let ao = material
-			.occlusion_texture()
-			.map(|t| t.texture().source())
-			.map(|s| gltf::image::Data::from_source(s.source(), Some(root), &[]))
-			.transpose()?;
-		let ao = ao.map(Texture::from_gltf_data);
-
-		let emissive = material.emissive_factor();
-		let emissive_texture = material
-			.emissive_texture()
-			.map(|t| t.texture().source())
-			.map(|s| gltf::image::Data::from_source(s.source(), Some(root), &[]))
-			.transpose()?;
-		let emissive = emissive_texture.map_or_else(
-			|| Texture::from_rgb_pixel_f32(emissive),
-			Texture::from_gltf_data,
-		);
-
-		Ok(Self {
-			albedo: albedo.into_handle(drum),
-			normal: normal.map(|t| t.into_handle(drum)),
-			metallic_roughness: Some(metallic_roughness.into_handle(drum)),
-			ao: ao.map(|t| t.into_handle(drum)),
-			emissive: Some(emissive.into_handle(drum)),
-			transparent: material.alpha_mode() == gltf::material::AlphaMode::Blend,
-		})
-	}
 }

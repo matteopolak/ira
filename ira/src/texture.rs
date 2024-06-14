@@ -93,8 +93,7 @@ pub struct GpuTextureCollection {
 
 	/// Default texture for when a texture is missing.
 	pub normal: Option<Handle<GpuTexture>>,
-	pub metallic_roughness: Option<Handle<GpuTexture>>,
-	pub ao: Option<Handle<GpuTexture>>,
+	pub orm: Option<Handle<GpuTexture>>,
 	pub emissive: Option<Handle<GpuTexture>>,
 }
 
@@ -114,20 +113,13 @@ impl GpuTextureCollection {
 		})
 	}
 
-	pub fn default_metallic_roughness(
+	pub fn default_orm(
 		&mut self,
 		device: &wgpu::Device,
 		queue: &wgpu::Queue,
 	) -> Handle<GpuTexture> {
-		self.metallic_roughness.unwrap_or_else(|| {
-			let texture = ira_drum::Texture::default_metallic_roughness().to_gpu(device, queue);
-			self.add_texture(texture)
-		})
-	}
-
-	pub fn default_ao(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) -> Handle<GpuTexture> {
-		self.ao.unwrap_or_else(|| {
-			let texture = ira_drum::Texture::default_ao().to_gpu(device, queue);
+		self.orm.unwrap_or_else(|| {
+			let texture = ira_drum::Texture::default_orm().to_gpu(device, queue);
 			self.add_texture(texture)
 		})
 	}

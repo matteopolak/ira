@@ -1,6 +1,6 @@
 [package]
 name = "ira"
-version = "0.0.5"
+version = "0.0.6"
 edition = "2021"
 license = "MIT"
 authors = ["Matthew Polak <git@matteopolak.com>"]
@@ -16,7 +16,7 @@ gltf = { version = "1", features = ["import"] }
 image = "0.25"
 log = "0.4"
 pollster = "0.3"
-tobj = { version = "4", features = ["async"] }
+
 wgpu = "0.20"
 winit = "0.30"
 
