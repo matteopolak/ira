@@ -1139,7 +1139,7 @@ dependencies = [
 
 [[package]]
 name = "ira"
-version = "0.0.6"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "bytemuck",
@@ -1156,7 +1156,7 @@ dependencies = [
 
 [[package]]
 name = "ira_cli"
-version = "0.0.6"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",

@@ -1,22 +1,21 @@
 [package]
 name = "ira"
-version = "0.0.6"
+version = "0.1.0"
 edition = "2021"
 license = "MIT"
 authors = ["Matthew Polak <git@matteopolak.com>"]
 description = "A general-purpose, code-first game engine."
 
 [dependencies]
-ira_drum = "0.0.6"
 anyhow = "1"
 bytemuck = { version = "1", features = ["derive"] }
 env_logger = "0.11"
 glam = "0.28"
 gltf = { version = "1", features = ["import"] }
 image = "0.25"
+ira_drum = "0.1.0"
 log = "0.4"
 pollster = "0.3"
-
 wgpu = "0.20"
 winit = "0.30"
 
