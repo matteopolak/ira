@@ -28,6 +28,22 @@ impl Vec3 {
 		Self { x, y, z }
 	}
 
+	pub fn min(self, other: Self) -> Self {
+		Self::new(
+			self.x.min(other.x),
+			self.y.min(other.y),
+			self.z.min(other.z),
+		)
+	}
+
+	pub fn max(self, other: Self) -> Self {
+		Self::new(
+			self.x.max(other.x),
+			self.y.max(other.y),
+			self.z.max(other.z),
+		)
+	}
+
 	pub fn cross(self, rhs: Self) -> Self {
 		Self::new(
 			self.y * rhs.z - self.z * rhs.y,
@@ -197,6 +213,9 @@ pub struct MeshBuilder {
 	pub vertices: Vec<Vertex>,
 	pub indices: Vec<u32>,
 	pub material: Handle<Material>,
+
+	pub min: Vec3,
+	pub max: Vec3,
 }
 
 impl MeshBuilder {
@@ -206,6 +225,9 @@ impl MeshBuilder {
 			vertices: self.vertices.into_boxed_slice(),
 			indices: self.indices.into_boxed_slice(),
 			material: self.material,
+
+			min: self.min,
+			max: self.max,
 		};
 
 		mesh.compute_tangents();
@@ -218,6 +240,10 @@ pub struct Mesh {
 	pub vertices: Box<[Vertex]>,
 	pub indices: Box<[u32]>,
 	pub material: Handle<Material>,
+
+	/// The axis-aligned bounding box of the mesh.
+	pub min: Vec3,
+	pub max: Vec3,
 }
 
 impl fmt::Debug for Mesh {
@@ -238,11 +264,20 @@ impl fmt::Debug for Mesh {
 
 impl Mesh {
 	#[must_use]
-	pub fn new(vertices: Box<[Vertex]>, indices: Box<[u32]>, material: Handle<Material>) -> Self {
+	pub fn new(
+		vertices: Box<[Vertex]>,
+		indices: Box<[u32]>,
+		material: Handle<Material>,
+		min: Vec3,
+		max: Vec3,
+	) -> Self {
 		let mut mesh = Self {
 			vertices,
 			indices,
 			material,
+
+			min,
+			max,
 		};
 
 		mesh.compute_tangents();

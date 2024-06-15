@@ -16,9 +16,20 @@ impl ira::App for App {
 	}
 
 	fn on_ready(&mut self, state: &mut State) {
-		let model = &mut state.drum.models[0];
+		// car
+		let car = &mut state.drum.models[0];
 
-		model.add_instance(Instance::default().with_up(Vec3::Z));
+		car.add_instance(
+			Instance::default()
+				.with_up(Vec3::Z)
+				.with_position(Vec3::Y * 200.0)
+				.with_gravity(),
+		);
+
+		// floor
+		let floor = &mut state.drum.models[1];
+
+		floor.add_instance(Instance::default());
 	}
 
 	fn on_frame(&mut self, state: &mut State, delta: Duration) {

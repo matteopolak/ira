@@ -10,6 +10,9 @@ pub struct GpuMesh {
 	pub material: Handle<GpuMaterial>,
 
 	pub num_indices: u32,
+	/// The bounding box of the mesh.
+	pub min: glam::Vec3,
+	pub max: glam::Vec3,
 }
 
 #[derive(Debug)]
@@ -234,6 +237,8 @@ impl MeshExt for ira_drum::Mesh {
 			index_buffer,
 			num_indices: self.indices.len() as u32,
 			material: Handle::new(self.material.raw()),
+			min: self.min.into(),
+			max: self.max.into(),
 		}
 	}
 }

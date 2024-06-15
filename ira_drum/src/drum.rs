@@ -1,4 +1,4 @@
-use std::{fs::File, io, path::Path};
+use std::{fmt, fs::File, io, path::Path};
 
 use bincode::{
 	error::{DecodeError, EncodeError},
@@ -22,6 +22,21 @@ pub struct Drum {
 	pub brdf_lut: Option<super::Texture>,
 	pub irradiance_map: Option<super::Texture>,
 	pub prefiltered_map: Option<super::Texture>,
+}
+
+impl fmt::Display for Drum {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		writeln!(f, "Texture count: {}", self.textures.len())?;
+		writeln!(f, "Material count: {}", self.materials.len())?;
+		writeln!(f, "Mesh count: {}", self.meshes.len())?;
+		writeln!(f, "Model count: {}", self.models.len())?;
+		writeln!(f, "Light count: {}", self.lights.len())?;
+		writeln!(f, "BRDF lut: {}", self.brdf_lut.is_some())?;
+		writeln!(f, "Irradiance map: {}", self.irradiance_map.is_some())?;
+		writeln!(f, "Prefiltered map: {}", self.prefiltered_map.is_some())?;
+
+		Ok(())
+	}
 }
 
 impl Drum {

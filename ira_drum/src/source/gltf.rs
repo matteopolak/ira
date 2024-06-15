@@ -5,7 +5,7 @@ use std::{
 };
 
 use crate::{
-	DrumBuilder, Extent3d, Format, Material, MeshHandles, Model, Source, Texture, Vec2, Vec3,
+	DrumBuilder, Extent3d, Format, Material, Mesh, MeshHandles, Model, Source, Texture, Vec2, Vec3,
 	Vertex,
 };
 
@@ -84,26 +84,33 @@ impl Source for GltfSource {
 				let normals = reader.read_normals().ok_or(gltf::Error::MissingBlob)?;
 				let tex_coords = reader.read_tex_coords(0);
 
+				let mut min = Vec3::splat(f32::INFINITY);
+				let mut max = Vec3::splat(f32::NEG_INFINITY);
+
 				let vertices = positions.zip(normals);
 				let vertices: Box<[Vertex]> = if let Some(tex_coords) = tex_coords {
 					vertices
 						.zip(tex_coords.into_f32())
 						.map(|((position, normal), tex_coord)| {
-							centroid += Vec3::from(position);
+							let position = Vec3::from(position);
 
-							Vertex::new(
-								position.into(),
-								normal.into(),
-								tex_coord.map(f32::fract).into(),
-							)
+							min = min.min(position);
+							max = max.max(position);
+							centroid += position;
+
+							Vertex::new(position, normal.into(), tex_coord.map(f32::fract).into())
 						})
 						.collect()
 				} else {
 					vertices
 						.map(|(position, normal)| {
-							centroid += Vec3::from(position);
+							let position = Vec3::from(position);
 
-							Vertex::new(position.into(), normal.into(), Vec2::ZERO)
+							min = min.min(position);
+							max = max.max(position);
+							centroid += position;
+
+							Vertex::new(position, normal.into(), Vec2::ZERO)
 						})
 						.collect()
 				};
@@ -116,10 +123,12 @@ impl Source for GltfSource {
 					.into_u32()
 					.collect();
 
-				let mesh = crate::Mesh::new(
+				let mesh = Mesh::new(
 					vertices,
 					indices,
 					material_handles[material_index.unwrap_or_default()],
+					min,
+					max,
 				);
 
 				let material = mesh.material.resolve(&drum.materials);

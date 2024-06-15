@@ -109,10 +109,12 @@ impl Source for ObjSource {
 
 		for model in self.models {
 			let mesh = model.mesh;
-
 			let handle = material_handles[mesh.material_id.unwrap_or(0)];
 
 			let mut vertices = Vec::new();
+
+			let mut min = Vec3::splat(f32::INFINITY);
+			let mut max = Vec3::splat(f32::NEG_INFINITY);
 
 			for i in 0..mesh.positions.len() / 3 {
 				let position = [
@@ -122,6 +124,8 @@ impl Source for ObjSource {
 				]
 				.into();
 
+				min = min.min(position);
+				max = max.max(position);
 				centroid += position;
 
 				let normal = if mesh.normals.len() == mesh.positions.len() {
@@ -150,6 +154,8 @@ impl Source for ObjSource {
 				vertices.into_boxed_slice(),
 				mesh.indices.into_boxed_slice(),
 				handle,
+				min,
+				max,
 			);
 
 			let material = handle.resolve(&drum.materials);

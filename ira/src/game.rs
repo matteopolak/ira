@@ -562,7 +562,7 @@ impl<A: App> ApplicationHandler for Game<A> {
 
 				if element_state.is_pressed() {
 					match key {
-						KeyCode::Escape => {
+						KeyCode::Escape if false => {
 							state.window.set_cursor_grab(CursorGrabMode::None).unwrap();
 							state.window.set_cursor_visible(true);
 						}

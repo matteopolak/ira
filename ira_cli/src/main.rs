@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use clap::{Parser, ValueHint};
 use ira_drum::{Drum, DrumBuilder, Mipmaps};
-use tracing::warn;
+use tracing::{info, warn};
 
 #[derive(Parser)]
 enum Args {
@@ -34,6 +34,12 @@ enum Args {
 		#[arg(short, long)]
 		mipmaps: Option<Option<u32>>,
 	},
+	/// Displays information about a Drum.
+	Info {
+		/// The Drum to display information about.
+		#[arg(value_hint = ValueHint::FilePath)]
+		drum: PathBuf,
+	},
 }
 
 fn main() -> anyhow::Result<()> {
@@ -64,6 +70,11 @@ fn main() -> anyhow::Result<()> {
 
 			drum.write_to_path(output)?;
 		}
+		Args::Info { drum } => {
+			let drum = Drum::from_path(drum)?;
+
+			println!("{}", drum);
+		}
 	}
 
 	Ok(())
@@ -88,11 +99,15 @@ fn pack(
 
 		match ext.to_str() {
 			Some("gltf") => {
+				info!(path = %asset.display(), "adding glTF asset");
+
 				let gltf = ira_drum::GltfSource::from_path(&asset)?;
 
 				drum.add(gltf)?;
 			}
 			Some("obj") => {
+				info!(path = %asset.display(), "adding OBJ asset");
+
 				let obj = ira_drum::ObjSource::from_path(&asset)?;
 
 				drum.add(obj)?;

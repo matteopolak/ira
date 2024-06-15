@@ -46,7 +46,7 @@ impl DrumExt for ira_drum::Drum {
 		drum.meshes = self.meshes.iter().map(|m| m.to_gpu(device)).collect();
 
 		drum.models = IntoIterator::into_iter(self.models)
-			.map(|m| m.into_gpu(device, Vec::new()))
+			.map(|m| m.into_gpu(device, &drum, Vec::new()))
 			.collect();
 
 		drum
