@@ -1,9 +1,8 @@
-use glam::Vec3;
 use ira_drum::Handle;
 
 use crate::{
-	GpuMaterial, GpuMesh, GpuModel, GpuTexture, GpuTextureCollection, Instance, MaterialExt,
-	MeshExt, ModelExt, TextureExt,
+	GpuMaterial, GpuMesh, GpuModel, GpuTexture, GpuTextureCollection, MaterialExt, MeshExt,
+	ModelExt, TextureExt,
 };
 
 #[derive(Debug, Default)]
@@ -47,7 +46,7 @@ impl DrumExt for ira_drum::Drum {
 		drum.meshes = self.meshes.iter().map(|m| m.to_gpu(device)).collect();
 
 		drum.models = IntoIterator::into_iter(self.models)
-			.map(|m| m.into_gpu(device, &[Instance::from_up(Vec3::ZERO, Vec3::Z)]))
+			.map(|m| m.into_gpu(device, Vec::new()))
 			.collect();
 
 		drum

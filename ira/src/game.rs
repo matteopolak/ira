@@ -1,7 +1,8 @@
 use crate::{
 	camera, light,
-	model::{self, DrawModel, Instance},
-	DrumExt, GpuDrum, GpuTexture, MaterialExt,
+	model::{DrawModel, Instance},
+	physics::Physics,
+	DrumExt, GpuDrum, GpuTexture, MaterialExt, VertexExt,
 };
 
 use std::{
@@ -10,7 +11,7 @@ use std::{
 };
 
 use glam::Vec3;
-use ira_drum::{Drum, Material};
+use ira_drum::{Drum, Material, Vertex};
 use winit::{
 	application::ApplicationHandler,
 	event::{DeviceEvent, KeyEvent, MouseButton, WindowEvent},
@@ -20,7 +21,13 @@ use winit::{
 };
 
 pub trait App {
-	fn on_ready(&mut self, window: &mut Window) -> Drum;
+	/// Called once at the start of the program, right after the window
+	/// is created but before anything else is done.
+	fn init(&mut self, window: &mut Window) -> Drum;
+
+	/// Called once when everything has been created on the GPU.
+	fn on_ready(&mut self, state: &mut State);
+	/// Called once per frame.
 	fn on_frame(&mut self, state: &mut State, delta: Duration);
 }
 
@@ -63,7 +70,7 @@ fn create_render_pipeline(
 		vertex: wgpu::VertexState {
 			module: shader,
 			entry_point: "vs_main",
-			buffers: &[model::Vertex::desc(), Instance::desc()],
+			buffers: &[Vertex::desc(), Instance::desc()],
 			compilation_options: Default::default(),
 		},
 		fragment: Some(wgpu::FragmentState {
@@ -467,9 +474,10 @@ impl<A: App> ApplicationHandler for Game<A> {
 		window.set_cursor_grab(CursorGrabMode::Locked).unwrap();
 		window.set_cursor_visible(false);
 
-		let drum = self.app.on_ready(&mut window);
-		let state = pollster::block_on(State::new(window, drum));
+		let drum = self.app.init(&mut window);
+		let mut state = pollster::block_on(State::new(window, drum));
 
+		self.app.on_ready(&mut state);
 		self.state = Some(state);
 	}
 
@@ -513,8 +521,16 @@ impl<A: App> ApplicationHandler for Game<A> {
 				let delta = state.last_frame.elapsed();
 
 				state.last_frame = time::Instant::now();
+
+				// physics update
+				state.update_physics(delta);
+
 				state.update(delta);
 				self.app.on_frame(state, delta);
+
+				for model in &mut state.drum.models {
+					model.update_instance_buffer(&state.device, &state.queue);
+				}
 
 				match state.render() {
 					Ok(..) => {}
@@ -525,7 +541,8 @@ impl<A: App> ApplicationHandler for Game<A> {
 					Err(wgpu::SurfaceError::Timeout) => log::warn!("surface timeout"),
 				}
 
-				std::thread::sleep(time::Duration::from_millis(10));
+				// TODO: add ability to change framerate limit
+				std::thread::sleep(Duration::from_millis(10));
 			}
 			WindowEvent::CloseRequested => {
 				event_loop.exit();

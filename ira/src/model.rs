@@ -1,45 +1,34 @@
-use std::{mem, ops::Range};
+use std::{mem, ops::Range, time::Duration};
 
 use bytemuck::{Pod, Zeroable};
-use glam::{Mat4, Vec2, Vec3};
+use glam::{Mat4, Vec3};
 use ira_drum::Handle;
 use wgpu::util::DeviceExt;
 
 use crate::{GpuDrum, GpuMaterial, GpuMesh};
 
-#[derive(Debug)]
-pub struct Vertex {
-	pub position: Vec3,
-	pub normal: Vec3,
-	pub tex_coords: Vec2,
-	pub tangent: Vec3,
+pub trait VertexExt {
+	const ATTRIBUTES: [wgpu::VertexAttribute; 4];
+
+	fn desc() -> wgpu::VertexBufferLayout<'static>;
+	fn into_gpu(self) -> GpuVertex;
 }
 
-impl Vertex {
-	pub const VERTICES: [wgpu::VertexAttribute; 4] =
+impl VertexExt for ira_drum::Vertex {
+	const ATTRIBUTES: [wgpu::VertexAttribute; 4] =
 		wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Float32x2, 3 => Float32x3];
 
 	#[must_use]
-	pub fn desc() -> wgpu::VertexBufferLayout<'static> {
+	fn desc() -> wgpu::VertexBufferLayout<'static> {
 		wgpu::VertexBufferLayout {
-			array_stride: mem::size_of::<Vertex>() as wgpu::BufferAddress,
+			array_stride: mem::size_of::<Self>() as wgpu::BufferAddress,
 			step_mode: wgpu::VertexStepMode::Vertex,
-			attributes: &Self::VERTICES,
+			attributes: &Self::ATTRIBUTES,
 		}
 	}
 
 	#[must_use]
-	pub fn new(position: Vec3, normal: Vec3, tex_coords: Vec2) -> Self {
-		Self {
-			position,
-			normal,
-			tex_coords,
-			tangent: Vec3::ZERO,
-		}
-	}
-
-	#[must_use]
-	pub fn into_gpu(self) -> GpuVertex {
+	fn into_gpu(self) -> GpuVertex {
 		GpuVertex {
 			position: self.position.into(),
 			normal: self.normal.into(),
@@ -59,13 +48,13 @@ pub struct GpuVertex {
 }
 
 #[derive(Debug)]
-pub struct Meshes {
+pub struct GpuMeshHandles {
 	pub opaque: Box<[Handle<GpuMesh>]>,
 	pub transparent: Box<[Handle<GpuMesh>]>,
 }
 
-impl From<ira_drum::Meshes> for Meshes {
-	fn from(meshes: ira_drum::Meshes) -> Self {
+impl From<ira_drum::MeshHandles> for GpuMeshHandles {
+	fn from(meshes: ira_drum::MeshHandles) -> Self {
 		Self {
 			opaque: meshes.opaque.iter().map(|h| Handle::new(h.raw())).collect(),
 			transparent: meshes
@@ -79,26 +68,76 @@ impl From<ira_drum::Meshes> for Meshes {
 
 #[derive(Debug)]
 pub struct GpuModel {
-	pub meshes: Meshes,
+	pub meshes: GpuMeshHandles,
 	pub instance_buffer: wgpu::Buffer,
-	pub instances: Vec<GpuInstance>,
+
+	last_instance_count: usize,
+	changed: bool,
+
+	// INVARIANT: `instances` and `instance_data` are the same length.
+	pub(crate) instances: Vec<GpuInstance>,
+	pub(crate) instance_data: Vec<Instance>,
 }
 
 impl GpuModel {
-	/// Sets the instance at the given index.
-	///
-	/// Note that, in order to see the changes, you must call [`GpuModel::recreate_instance_buffer`].
-	pub fn set_instance(&mut self, index: usize, instance: &Instance) {
-		self.instances[index] = instance.to_gpu();
+	pub fn new(device: &wgpu::Device, meshes: GpuMeshHandles, instances: Vec<Instance>) -> Self {
+		let gpu_instances = instances.iter().map(Instance::to_gpu).collect::<Vec<_>>();
+
+		Self {
+			meshes,
+			instance_buffer: Self::create_instance_buffer(device, &gpu_instances),
+			last_instance_count: instances.len(),
+			changed: false,
+			instances: gpu_instances,
+			instance_data: instances,
+		}
+	}
+
+	pub fn add_instance(&mut self, instance: Instance) {
+		self.instances.push(instance.to_gpu());
+		self.instance_data.push(instance);
+	}
+
+	pub fn update_instance<F>(&mut self, index: usize, update: F)
+	where
+		F: FnOnce(&mut Instance),
+	{
+		update(&mut self.instance_data[index]);
+		self.instances[index] = self.instance_data[index].to_gpu();
+		self.changed = true;
+	}
+
+	#[must_use]
+	pub fn create_instance_buffer(
+		device: &wgpu::Device,
+		instances: &[GpuInstance],
+	) -> wgpu::Buffer {
+		device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+			label: Some("instance buffer"),
+			contents: bytemuck::cast_slice(instances),
+			usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+		})
 	}
 
 	/// Recreates the instance buffer with the current instance data.
 	pub fn recreate_instance_buffer(&mut self, device: &wgpu::Device) {
-		self.instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-			label: Some("Instance Buffer"),
-			contents: bytemuck::cast_slice(&self.instances),
-			usage: wgpu::BufferUsages::VERTEX,
-		});
+		self.instance_buffer = Self::create_instance_buffer(device, &self.instances);
+	}
+
+	/// Updates the instance buffer with the current instance data.
+	///
+	/// If the number of instances has changed, the buffer is recreated.
+	pub fn update_instance_buffer(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) {
+		if self.instances.len() != self.last_instance_count {
+			self.recreate_instance_buffer(device);
+			self.last_instance_count = self.instances.len();
+		} else if self.changed {
+			queue.write_buffer(
+				&self.instance_buffer,
+				0,
+				bytemuck::cast_slice(&self.instances),
+			);
+		}
 	}
 }
 
@@ -107,13 +146,16 @@ impl GpuModel {
 pub struct Instance {
 	pub position: Vec3,
 	pub rotation: glam::Quat,
+
+	pub velocity: Vec3,
+	pub gravity: bool,
 }
 
 #[must_use]
 #[repr(C)]
 #[derive(Copy, Clone, Debug, Pod, Zeroable)]
 pub struct GpuInstance {
-	pub model: [[f32; 4]; 4],
+	model: [[f32; 4]; 4],
 }
 
 impl Instance {
@@ -133,23 +175,30 @@ impl Instance {
 		}
 	}
 
-	pub fn new(position: Vec3, rotation: glam::Quat) -> Self {
-		Self { position, rotation }
+	/// Enables gravity for the instance.
+	pub fn with_gravity(mut self) -> Self {
+		self.gravity = true;
+		self
+	}
+
+	/// Sets the velocity of the instance.
+	pub fn with_velocity(mut self, velocity: Vec3) -> Self {
+		self.velocity = velocity;
+		self
 	}
 
 	pub fn rotate_y(&mut self, rad: f32) {
 		self.rotation = glam::Quat::from_rotation_y(rad) * self.rotation;
 	}
 
-	/// Creates an instance with the given position and up vector.
+	/// Rotates the instance such that `up` rotates the instance to the up vector
+	/// of the engine (which is `Vec3::Y`).
 	///
 	/// This is particularly useful when importing a model with a different up vector.
 	/// The up vector used in Ira is [`Vec3::Y`].
-	pub fn from_up(position: Vec3, up: Vec3) -> Self {
-		Self {
-			position,
-			rotation: glam::Quat::from_rotation_arc(up, Vec3::Y),
-		}
+	pub fn with_up(mut self, up: Vec3) -> Self {
+		self.rotation = glam::Quat::from_rotation_arc(up, Vec3::Y);
+		self
 	}
 
 	pub fn to_gpu(&self) -> GpuInstance {
@@ -161,24 +210,12 @@ impl Instance {
 }
 
 pub trait ModelExt {
-	fn into_gpu(self, device: &wgpu::Device, instances: &[Instance]) -> GpuModel;
+	fn into_gpu(self, device: &wgpu::Device, instances: Vec<Instance>) -> GpuModel;
 }
 
 impl ModelExt for ira_drum::Model {
-	fn into_gpu(self, device: &wgpu::Device, instances: &[Instance]) -> GpuModel {
-		let instances = instances.iter().map(Instance::to_gpu).collect::<Vec<_>>();
-
-		let instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-			label: Some("Instance Buffer"),
-			contents: bytemuck::cast_slice(&instances),
-			usage: wgpu::BufferUsages::VERTEX,
-		});
-
-		GpuModel {
-			meshes: self.meshes.into(),
-			instance_buffer,
-			instances,
-		}
+	fn into_gpu(self, device: &wgpu::Device, instances: Vec<Instance>) -> GpuModel {
+		GpuModel::new(device, self.meshes.into(), instances)
 	}
 }
 

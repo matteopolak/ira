@@ -8,7 +8,7 @@ use std::{
 };
 
 use crate::{
-	DrumBuilder, Handle, Material, Mesh, Meshes, Model, Source, Texture, Vec2, Vec3, Vertex,
+	DrumBuilder, Handle, Material, Mesh, MeshHandles, Model, Source, Texture, Vec2, Vec3, Vertex,
 };
 
 #[must_use]
@@ -164,7 +164,7 @@ impl Source for ObjSource {
 		centroid /= num_vertices as f32;
 
 		let model = Model {
-			meshes: Meshes {
+			meshes: MeshHandles {
 				opaque: opaque_meshes.into_boxed_slice(),
 				transparent: transparent_meshes.into_boxed_slice(),
 			},

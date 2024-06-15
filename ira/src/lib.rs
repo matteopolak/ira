@@ -13,6 +13,7 @@ pub mod game;
 pub mod light;
 pub mod material;
 pub mod model;
+pub mod physics;
 pub mod texture;
 
 pub use camera::*;
@@ -24,6 +25,7 @@ pub use model::*;
 pub use texture::*;
 
 pub use glam;
+pub use ira_drum::*;
 pub use pollster;
 pub use wgpu;
 pub use winit;

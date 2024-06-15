@@ -156,6 +156,12 @@ impl From<[f32; 2]> for Vec2 {
 	}
 }
 
+impl From<Vec2> for [f32; 2] {
+	fn from(Vec2 { x, y }: Vec2) -> [f32; 2] {
+		[x, y]
+	}
+}
+
 impl ops::Sub for Vec2 {
 	type Output = Self;
 
@@ -288,13 +294,13 @@ impl Mesh {
 }
 
 #[derive(Debug, Encode, Decode)]
-pub struct Meshes {
+pub struct MeshHandles {
 	pub opaque: Box<[Handle<Mesh>]>,
 	pub transparent: Box<[Handle<Mesh>]>,
 }
 
 #[derive(Debug, Encode, Decode)]
 pub struct Model {
-	pub meshes: Meshes,
+	pub meshes: MeshHandles,
 	pub center: Vec3,
 }

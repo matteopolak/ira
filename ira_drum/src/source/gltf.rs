@@ -5,7 +5,8 @@ use std::{
 };
 
 use crate::{
-	DrumBuilder, Extent3d, Format, Material, Meshes, Model, Source, Texture, Vec2, Vec3, Vertex,
+	DrumBuilder, Extent3d, Format, Material, MeshHandles, Model, Source, Texture, Vec2, Vec3,
+	Vertex,
 };
 
 #[must_use]
@@ -134,7 +135,7 @@ impl Source for GltfSource {
 		centroid /= num_vertices as f32;
 
 		let model = Model {
-			meshes: Meshes {
+			meshes: MeshHandles {
 				opaque: opaque_meshes.into_boxed_slice(),
 				transparent: transparent_meshes.into_boxed_slice(),
 			},
