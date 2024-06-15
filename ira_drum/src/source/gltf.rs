@@ -222,9 +222,6 @@ impl Texture {
 		let mf = (mf * 255.0) as u8;
 		let rf = (rf * 255.0) as u8;
 
-		println!("mf: {}, rf: {}", mf, rf);
-		println!("has ao: {} | has mr: {}", ao.is_some(), mr.is_some());
-
 		match (ao, mr) {
 			(Some(ao), Some(mr)) => {
 				let ao = ao.into_rgba8();
@@ -344,7 +341,6 @@ impl Material {
 			.map(|t| t.texture().source())
 			.map(|s| gltf::image::Data::from_source(s.source(), Some(root), &[]))
 			.transpose()?;
-		println!("material {:?}", material.name());
 		let orm = Texture::from_ao_mr(ao, metallic_roughness, metallic_factor, roughness_factor);
 
 		let emissive = material.emissive_factor();

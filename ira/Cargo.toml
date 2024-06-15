@@ -13,7 +13,7 @@ env_logger = "0.11"
 glam = "0.28"
 gltf = { version = "1", features = ["import"] }
 image = "0.25"
-ira_drum = "0.1.0"
+ira_drum.path = "../ira_drum"
 log = "0.4"
 pollster = "0.3"
 wgpu = "0.20"

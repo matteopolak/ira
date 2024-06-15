@@ -62,6 +62,7 @@ pub enum Format {
 	Rg8Unorm,
 	/// Stored as RGBA, alpha channel is treated as binary.
 	Rgb8A8Unorm,
+	Rgb8A8UnormSrgb,
 	Rgba8Unorm,
 	Rgba8UnormSrgb,
 	Rgba32Float,
@@ -85,7 +86,7 @@ impl Format {
 		match self {
 			R8Unorm => 1,
 			Rg8Unorm => 2,
-			Rgb8A8Unorm | Rgba8Unorm | Rgba8UnormSrgb | Depth32Float => 4,
+			Rgb8A8Unorm | Rgb8A8UnormSrgb | Rgba8Unorm | Rgba8UnormSrgb | Depth32Float => 4,
 			Bc1RgbaUnorm | Bc1RgbaUnormSrgb | Bc4RUnorm => 8,
 			Rgba32Float | Bc5RgUnorm | Bc3RgbaUnorm | Bc3RgbaUnormSrgb | Bc7RgbaUnorm
 			| Bc7RgbaUnormSrgb => 16,
@@ -101,6 +102,7 @@ impl Format {
 			Rg8Unorm => Bc5RgUnorm,
 			Rgb8A8Unorm => Bc1RgbaUnorm,
 			Rgba8Unorm => Bc7RgbaUnorm,
+			Rgb8A8UnormSrgb => Bc1RgbaUnormSrgb,
 			Rgba8UnormSrgb => Bc7RgbaUnormSrgb,
 			_ => return None,
 		})
@@ -111,6 +113,7 @@ impl Format {
 		use Format::*;
 
 		match self {
+			Rgb8A8Unorm => Rgb8A8UnormSrgb,
 			Rgba8Unorm => Rgba8UnormSrgb,
 			Bc1RgbaUnorm => Bc1RgbaUnormSrgb,
 			Bc3RgbaUnorm => Bc3RgbaUnormSrgb,
@@ -205,7 +208,7 @@ impl From<Format> for wgpu::TextureFormat {
 			F::R8Unorm => W::R8Unorm,
 			F::Rg8Unorm => W::Rg8Unorm,
 			F::Rgba8Unorm | F::Rgb8A8Unorm => W::Rgba8Unorm,
-			F::Rgba8UnormSrgb => W::Rgba8UnormSrgb,
+			F::Rgba8UnormSrgb | F::Rgb8A8UnormSrgb => W::Rgba8UnormSrgb,
 			F::Rgba32Float => W::Rgba32Float,
 			F::Depth32Float => W::Depth32Float,
 			F::Bc1RgbaUnorm => W::Bc1RgbaUnorm,

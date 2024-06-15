@@ -30,7 +30,6 @@ struct VertexOutput {
 	@location(2) tbn_matrix_0: vec3<f32>,
 	@location(3) tbn_matrix_1: vec3<f32>,
 	@location(4) tbn_matrix_2: vec3<f32>,
-	@location(5) normal: vec3<f32>,
 }
 
 @group(1) @binding(0)
@@ -74,8 +73,6 @@ fn vs_main(model: VertexInput, instance: InstanceInput) -> VertexOutput {
 	out.tbn_matrix_0 = tbn[0];
 	out.tbn_matrix_1 = tbn[1];
 	out.tbn_matrix_2 = tbn[2];
-
-	out.normal = world_normal;
 
 	return out;
 }

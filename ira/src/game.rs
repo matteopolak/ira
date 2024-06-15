@@ -4,7 +4,10 @@ use crate::{
 	DrumExt, GpuDrum, GpuTexture, MaterialExt,
 };
 
-use std::{sync::Arc, time};
+use std::{
+	sync::Arc,
+	time::{self, Duration},
+};
 
 use glam::Vec3;
 use ira_drum::{Drum, Material};
@@ -16,17 +19,20 @@ use winit::{
 	window::{CursorGrabMode, Fullscreen, Window, WindowAttributes, WindowId},
 };
 
-pub struct App {
-	state: Option<State>,
-	on_ready: fn(&mut Window) -> Drum,
+pub trait App {
+	fn on_ready(&mut self, window: &mut Window) -> Drum;
+	fn on_frame(&mut self, state: &mut State, delta: Duration);
 }
 
-impl App {
-	pub fn new(on_ready: fn(&mut Window) -> Drum) -> Self {
-		Self {
-			state: None,
-			on_ready,
-		}
+pub struct Game<A: App> {
+	state: Option<State>,
+	app: A,
+}
+
+impl<A: App> Game<A> {
+	/// Creates a new game.
+	pub fn new(app: A) -> Self {
+		Self { state: None, app }
 	}
 
 	/// Runs the application.
@@ -114,7 +120,7 @@ pub struct State {
 
 	multisampled_texture: GpuTexture,
 
-	drum: GpuDrum,
+	pub drum: GpuDrum,
 }
 
 async fn request_device(adapter: &wgpu::Adapter) -> (wgpu::Device, wgpu::Queue) {
@@ -452,7 +458,7 @@ impl State {
 	}
 }
 
-impl ApplicationHandler for App {
+impl<A: App> ApplicationHandler for Game<A> {
 	fn resumed(&mut self, event_loop: &ActiveEventLoop) {
 		let mut window = event_loop
 			.create_window(WindowAttributes::default().with_title("Triangle"))
@@ -461,7 +467,7 @@ impl ApplicationHandler for App {
 		window.set_cursor_grab(CursorGrabMode::Locked).unwrap();
 		window.set_cursor_visible(false);
 
-		let drum = (self.on_ready)(&mut window);
+		let drum = self.app.on_ready(&mut window);
 		let state = pollster::block_on(State::new(window, drum));
 
 		self.state = Some(state);
@@ -489,30 +495,31 @@ impl ApplicationHandler for App {
 		window_id: WindowId,
 		event: WindowEvent,
 	) {
-		let Some(app) = self.state.as_mut() else {
+		let Some(state) = self.state.as_mut() else {
 			return;
 		};
 
-		if window_id != app.window.id() {
+		if window_id != state.window.id() {
 			return;
 		}
 
 		match event {
 			WindowEvent::Resized(size) => {
-				app.resize(size);
+				state.resize(size);
 			}
 			WindowEvent::RedrawRequested => {
-				app.window.request_redraw();
+				state.window.request_redraw();
 
-				let delta = app.last_frame.elapsed();
+				let delta = state.last_frame.elapsed();
 
-				app.last_frame = time::Instant::now();
-				app.update(delta);
+				state.last_frame = time::Instant::now();
+				state.update(delta);
+				self.app.on_frame(state, delta);
 
-				match app.render() {
+				match state.render() {
 					Ok(..) => {}
 					Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
-						app.resize(app.window.inner_size());
+						state.resize(state.window.inner_size());
 					}
 					Err(wgpu::SurfaceError::OutOfMemory) => event_loop.exit(),
 					Err(wgpu::SurfaceError::Timeout) => log::warn!("surface timeout"),
@@ -526,42 +533,43 @@ impl ApplicationHandler for App {
 			WindowEvent::KeyboardInput {
 				event:
 					KeyEvent {
-						state,
+						state: element_state,
 						physical_key: PhysicalKey::Code(key),
 						..
 					},
 				..
 			} => {
-				if app.controller.process_keyboard(key, state) {
+				if state.controller.process_keyboard(key, element_state) {
 					return;
 				}
 
-				if state.is_pressed() {
+				if element_state.is_pressed() {
 					match key {
 						KeyCode::Escape => {
-							app.window.set_cursor_grab(CursorGrabMode::None).unwrap();
-							app.window.set_cursor_visible(true);
+							state.window.set_cursor_grab(CursorGrabMode::None).unwrap();
+							state.window.set_cursor_visible(true);
 						}
-						KeyCode::F11 if app.window.fullscreen().is_none() => {
-							app.window
+						KeyCode::F11 if state.window.fullscreen().is_none() => {
+							state
+								.window
 								.set_fullscreen(Some(Fullscreen::Borderless(None)));
 						}
 						KeyCode::F11 => {
-							app.window.set_fullscreen(None);
+							state.window.set_fullscreen(None);
 						}
 						_ => {}
 					}
 				}
 			}
 			WindowEvent::MouseWheel { delta, .. } => {
-				app.controller.process_scroll(&delta);
+				state.controller.process_scroll(&delta);
 			}
 			WindowEvent::MouseInput {
-				state,
+				state: element_state,
 				button: MouseButton::Left,
 				..
 			} => {
-				app.controller.mouse_pressed = state.is_pressed();
+				state.controller.mouse_pressed = element_state.is_pressed();
 			}
 			_ => {}
 		}

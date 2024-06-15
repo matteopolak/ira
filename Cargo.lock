@@ -239,7 +239,7 @@ name = "basic"
 version = "0.0.0"
 dependencies = [
  "ira",
- "ira_drum 0.0.6",
+ "ira_drum",
 ]
 
 [[package]]
@@ -1147,7 +1147,7 @@ dependencies = [
  "glam",
  "gltf",
  "image",
- "ira_drum 0.0.6 (registry+https://github.com/rust-lang/crates.io-index)",
+ "ira_drum",
  "log",
  "pollster",
  "wgpu",
@@ -1160,33 +1160,14 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
- "ira_drum 0.0.6 (registry+https://github.com/rust-lang/crates.io-index)",
+ "ira_drum",
  "tracing",
  "tracing-subscriber",
 ]
 
 [[package]]
 name = "ira_drum"
-version = "0.0.6"
-dependencies = [
- "bincode",
- "bytemuck",
- "flate2",
- "glam",
- "gltf",
- "image",
- "image_dds__patch",
- "thiserror",
- "tobj",
- "tracing",
- "wgpu",
-]
-
-[[package]]
-name = "ira_drum"
-version = "0.0.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b5d179fc1c053f3c2eecea7c36e5f063f2ed0868481d5f85494c240c8a7eb1c5"
+version = "0.1.0"
 dependencies = [
  "bincode",
  "bytemuck",

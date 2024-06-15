@@ -84,6 +84,24 @@ pub struct GpuModel {
 	pub instances: Vec<GpuInstance>,
 }
 
+impl GpuModel {
+	/// Sets the instance at the given index.
+	///
+	/// Note that, in order to see the changes, you must call [`GpuModel::recreate_instance_buffer`].
+	pub fn set_instance(&mut self, index: usize, instance: &Instance) {
+		self.instances[index] = instance.to_gpu();
+	}
+
+	/// Recreates the instance buffer with the current instance data.
+	pub fn recreate_instance_buffer(&mut self, device: &wgpu::Device) {
+		self.instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+			label: Some("Instance Buffer"),
+			contents: bytemuck::cast_slice(&self.instances),
+			usage: wgpu::BufferUsages::VERTEX,
+		});
+	}
+}
+
 #[must_use]
 #[derive(Debug, Default)]
 pub struct Instance {
@@ -117,6 +135,10 @@ impl Instance {
 
 	pub fn new(position: Vec3, rotation: glam::Quat) -> Self {
 		Self { position, rotation }
+	}
+
+	pub fn rotate_y(&mut self, rad: f32) {
+		self.rotation = glam::Quat::from_rotation_y(rad) * self.rotation;
 	}
 
 	/// Creates an instance with the given position and up vector.
