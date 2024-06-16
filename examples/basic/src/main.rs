@@ -34,15 +34,17 @@ impl ira::App for App {
 
 	fn on_ready(&mut self, state: &mut State) {
 		// car
-		state.add_instance(
-			0,
-			InstanceBuilder::default()
-				.up(Vec3::Z)
-				.rotation(Quat::from_rotation_x(PI * 0.25))
-				.position(Vec3::new(0.0, 20.0, 0.0))
-				.scale(Vec3::splat(5.0))
-				.rigidbody(RigidBodyBuilder::dynamic()),
-		);
+		for i in 0..10 {
+			state.add_instance(
+				0,
+				InstanceBuilder::default()
+					.up(Vec3::Z)
+					.rotation(Quat::from_rotation_x(PI * 0.25))
+					.position(Vec3::new(0.0, 10.0 + i as f32 * 5.0, 0.0))
+					.scale(Vec3::splat(5.0))
+					.rigidbody(RigidBodyBuilder::dynamic()),
+			);
+		}
 
 		// floor
 		state.add_instance(

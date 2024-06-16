@@ -15,7 +15,7 @@ use ira_drum::{Drum, Material, Vertex};
 use winit::{
 	application::ApplicationHandler,
 	event::{DeviceEvent, KeyEvent, WindowEvent},
-	event_loop::{ActiveEventLoop, EventLoop},
+	event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
 	keyboard::{KeyCode, PhysicalKey},
 	window::{CursorGrabMode, Fullscreen, Window, WindowAttributes, WindowId},
 };
@@ -52,6 +52,7 @@ impl<A: App> Game<A> {
 	pub fn run(mut self) -> Result<(), winit::error::EventLoopError> {
 		let event_loop = EventLoop::new()?;
 
+		event_loop.set_control_flow(ControlFlow::Poll);
 		event_loop.run_app(&mut self)
 	}
 }
@@ -247,7 +248,7 @@ impl State {
 			width: size.width,
 			height: size.height,
 			desired_maximum_frame_latency: 2,
-			present_mode: wgpu::PresentMode::Fifo,
+			present_mode: wgpu::PresentMode::Mailbox,
 			alpha_mode: wgpu::CompositeAlphaMode::Auto,
 			view_formats: vec![],
 		};
@@ -472,6 +473,45 @@ impl State {
 	}
 }
 
+impl<A: App> Game<A> {
+	fn render(&mut self, event_loop: &ActiveEventLoop) {
+		let Some(state) = self.state.as_mut() else {
+			return;
+		};
+
+		let delta = state.last_physics.elapsed();
+
+		// physics 60fps
+		if delta.as_secs_f32() >= 1.0 / 60.0 {
+			state.last_physics = time::Instant::now();
+			state.physics_update();
+		}
+
+		let delta = state.last_frame.elapsed();
+
+		state.last_frame = time::Instant::now();
+
+		state.update(delta);
+		self.app.on_frame(state, delta);
+
+		// TODO: only update instances that have changed
+		for model in &mut state.drum.models {
+			model.update_instance_buffer(&state.device, &state.queue);
+		}
+
+		match state.render() {
+			Ok(..) => {}
+			Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
+				state.resize(state.window.inner_size());
+			}
+			Err(wgpu::SurfaceError::OutOfMemory) => event_loop.exit(),
+			Err(wgpu::SurfaceError::Timeout) => log::warn!("surface timeout"),
+		}
+
+		println!("fps: {}", 1.0 / delta.as_secs_f32());
+	}
+}
+
 impl<A: App> ApplicationHandler for Game<A> {
 	fn resumed(&mut self, event_loop: &ActiveEventLoop) {
 		let mut window = event_loop
@@ -503,6 +543,18 @@ impl<A: App> ApplicationHandler for Game<A> {
 		}
 	}
 
+	fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+		let Some(state) = self.state.as_mut() else {
+			return;
+		};
+
+		if state.last_frame.elapsed().as_secs_f32() < 1.0 / state.desired_fps {
+			return;
+		}
+
+		self.render(event_loop);
+	}
+
 	fn window_event(
 		&mut self,
 		event_loop: &ActiveEventLoop,
@@ -522,40 +574,7 @@ impl<A: App> ApplicationHandler for Game<A> {
 				state.resize(size);
 			}
 			WindowEvent::RedrawRequested => {
-				state.window.request_redraw();
-
-				let delta = state.last_physics.elapsed();
-
-				// physics 60fps
-				if delta.as_secs_f32() >= 1.0 / 60.0 {
-					state.last_physics = time::Instant::now();
-					state.physics_update();
-				}
-
-				let delta = state.last_frame.elapsed();
-
-				if delta.as_secs_f32() < 1.0 / state.desired_fps {
-					return;
-				}
-
-				state.last_frame = time::Instant::now();
-
-				state.update(delta);
-				self.app.on_frame(state, delta);
-
-				// TODO: only update instances that have changed
-				for model in &mut state.drum.models {
-					model.update_instance_buffer(&state.device, &state.queue);
-				}
-
-				match state.render() {
-					Ok(..) => {}
-					Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
-						state.resize(state.window.inner_size());
-					}
-					Err(wgpu::SurfaceError::OutOfMemory) => event_loop.exit(),
-					Err(wgpu::SurfaceError::Timeout) => log::warn!("surface timeout"),
-				}
+				self.render(event_loop);
 			}
 			WindowEvent::CloseRequested => {
 				event_loop.exit();
