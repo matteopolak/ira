@@ -17,6 +17,11 @@ impl GpuDrum {
 	pub fn add_texture(&mut self, texture: GpuTexture) -> Handle<GpuTexture> {
 		self.textures.add_texture(texture)
 	}
+
+	#[must_use]
+	pub fn model_id(&self, name: &str) -> Option<usize> {
+		self.models.iter().position(|m| &*m.name == name)
+	}
 }
 
 pub trait DrumExt {

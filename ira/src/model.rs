@@ -4,14 +4,14 @@ use bytemuck::{Pod, Zeroable};
 use glam::{Mat4, Quat, Vec3};
 use ira_drum::Handle;
 use rapier3d::{
-	dynamics::{RigidBodyBuilder, RigidBodyHandle},
+	dynamics::{RigidBody, RigidBodyBuilder, RigidBodyHandle},
 	geometry::{ColliderBuilder, ColliderHandle},
 };
 use wgpu::util::DeviceExt;
 
 use crate::{
 	physics::{BoundingBox, PhysicsState},
-	GpuDrum, GpuMaterial, GpuMesh,
+	Context, GpuDrum, GpuMaterial, GpuMesh,
 };
 
 pub trait VertexExt {
@@ -92,6 +92,8 @@ impl From<ira_drum::MeshHandles> for GpuMeshHandles {
 
 #[derive(Debug)]
 pub struct GpuModel {
+	pub(crate) name: Box<str>,
+
 	pub(crate) meshes: GpuMeshHandles,
 	pub(crate) instance_buffer: wgpu::Buffer,
 
@@ -113,6 +115,7 @@ impl GpuModel {
 		drum: &GpuDrum,
 		meshes: GpuMeshHandles,
 		instances: Vec<Instance>,
+		name: Box<str>,
 	) -> Self {
 		let gpu_instances = instances
 			.iter()
@@ -121,6 +124,8 @@ impl GpuModel {
 		let (min, max) = meshes.min_max(drum);
 
 		Self {
+			name,
+
 			meshes,
 			instance_buffer: Self::create_instance_buffer(device, &gpu_instances),
 			last_instance_count: instances.len(),
@@ -162,6 +167,37 @@ impl GpuModel {
 				0,
 				bytemuck::cast_slice(&self.instances),
 			);
+		}
+	}
+
+	pub(crate) fn draw_instanced<'r, 's: 'r>(
+		&'s self,
+		pass: &mut wgpu::RenderPass<'r>,
+		drum: &'s GpuDrum,
+		camera_bind_group: &'s wgpu::BindGroup,
+		light_bind_group: &'s wgpu::BindGroup,
+		brdf_bind_group: &'s wgpu::BindGroup,
+		transparent: bool,
+	) {
+		let meshes = if transparent {
+			&self.meshes.transparent
+		} else {
+			&self.meshes.opaque
+		};
+
+		pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
+
+		for mesh in meshes {
+			let mesh = mesh.resolve(&drum.meshes);
+			let material = mesh.material.resolve(&drum.materials);
+
+			pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
+			pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+			pass.set_bind_group(0, &material.bind_group, &[]);
+			pass.set_bind_group(1, camera_bind_group, &[]);
+			pass.set_bind_group(2, light_bind_group, &[]);
+			pass.set_bind_group(3, brdf_bind_group, &[]);
+			pass.draw_indexed(0..mesh.num_indices, 0, 0..self.instances.len() as _);
 		}
 	}
 }
@@ -255,6 +291,59 @@ impl Body {
 			}
 		}
 	}
+
+	pub fn update<F>(&mut self, physics: &mut PhysicsState, update: F)
+	where
+		F: FnOnce(&mut RigidBody),
+	{
+		match self {
+			Self::Static { .. } => {}
+			Self::Rigid(handle) => {
+				let Some(body) = physics.rigid_bodies.get_mut(*handle) else {
+					return;
+				};
+
+				update(body);
+			}
+		}
+	}
+
+	pub fn set_transform(&mut self, physics: &mut PhysicsState, position: Vec3, rotation: Quat) {
+		match self {
+			Self::Static {
+				position: p,
+				rotation: r,
+			} => {
+				*p = position;
+				*r = rotation;
+			}
+			Self::Rigid(handle) => {
+				let Some(body) = physics.rigid_bodies.get_mut(*handle) else {
+					return;
+				};
+
+				if body.is_kinematic() {
+					body.set_next_kinematic_position((position, rotation).into());
+				} else {
+					body.set_position((position, rotation).into(), true);
+				}
+			}
+		}
+	}
+
+	pub fn pos_rot(&self, physics: &PhysicsState) -> (Vec3, Quat) {
+		match self {
+			Self::Static { position, rotation } => (*position, *rotation),
+			Self::Rigid(handle) => {
+				let position = physics
+					.rigid_bodies
+					.get(*handle)
+					.map_or_else(Default::default, |r| *r.position());
+
+				(position.translation.vector.into(), position.rotation.into())
+			}
+		}
+	}
 }
 
 #[must_use]
@@ -287,6 +376,10 @@ impl Instance {
 		InstanceBuilder::default()
 	}
 
+	pub fn pos_rot(&self, physics: &PhysicsState) -> (Vec3, Quat) {
+		self.body.pos_rot(physics)
+	}
+
 	pub fn to_gpu(&self, physics: &PhysicsState) -> GpuInstance {
 		let (position, rotation) = match self.body {
 			Body::Rigid(handle) => {
@@ -295,7 +388,7 @@ impl Instance {
 					.get(handle)
 					.map_or_else(Default::default, |r| *r.position());
 
-				(position.translation.vector.into(), position.rotation.into())
+				position.into()
 			}
 			Body::Static { position, rotation } => (position, rotation),
 		};
@@ -308,6 +401,23 @@ impl Instance {
 
 	pub fn rotate_y(&mut self, physics: &mut PhysicsState, rad: f32) {
 		self.body.rotate_y(physics, rad);
+	}
+
+	pub fn move_and_rotate(&self, physics: &mut PhysicsState, position: Vec3, rotation: Quat) {
+		match self.body {
+			Body::Static { .. } => {}
+			Body::Rigid(handle) => {
+				let Some(body) = physics.rigid_bodies.get_mut(handle) else {
+					return;
+				};
+
+				if body.is_kinematic() {
+					body.set_next_kinematic_position((position, rotation).into());
+				} else {
+					body.set_position((position, rotation).into(), true);
+				}
+			}
+		}
 	}
 }
 
@@ -343,83 +453,13 @@ impl ModelExt for ira_drum::Model {
 		drum: &GpuDrum,
 		instances: Vec<Instance>,
 	) -> GpuModel {
-		GpuModel::new(device, physics, drum, self.meshes.into(), instances)
-	}
-}
-
-pub trait DrawModel<'a> {
-	fn draw_mesh_instanced(
-		&mut self,
-		mesh: &'a GpuMesh,
-		material: &'a GpuMaterial,
-		instances: Range<u32>,
-		camera_bind_group: &'a wgpu::BindGroup,
-		light_bind_group: &'a wgpu::BindGroup,
-		brdf_bind_group: &'a wgpu::BindGroup,
-	);
-
-	fn draw_model_instanced(
-		&mut self,
-		drum: &'a GpuDrum,
-		model: &'a GpuModel,
-		camera_bind_group: &'a wgpu::BindGroup,
-		light_bind_group: &'a wgpu::BindGroup,
-		brdf_bind_group: &'a wgpu::BindGroup,
-		transparent: bool,
-	);
-}
-
-impl<'a, 'b> DrawModel<'b> for wgpu::RenderPass<'a>
-where
-	'b: 'a,
-{
-	fn draw_mesh_instanced(
-		&mut self,
-		mesh: &'b GpuMesh,
-		material: &'a GpuMaterial,
-		instances: Range<u32>,
-		camera_bind_group: &'b wgpu::BindGroup,
-		light_bind_group: &'b wgpu::BindGroup,
-		brdf_bind_group: &'b wgpu::BindGroup,
-	) {
-		self.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
-		self.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
-		self.set_bind_group(0, &material.bind_group, &[]);
-		self.set_bind_group(1, camera_bind_group, &[]);
-		self.set_bind_group(2, light_bind_group, &[]);
-		self.set_bind_group(3, brdf_bind_group, &[]);
-		self.draw_indexed(0..mesh.num_indices, 0, instances);
-	}
-
-	fn draw_model_instanced(
-		&mut self,
-		drum: &'b GpuDrum,
-		model: &'b GpuModel,
-		camera_bind_group: &'b wgpu::BindGroup,
-		light_bind_group: &'b wgpu::BindGroup,
-		brdf_bind_group: &'b wgpu::BindGroup,
-		transparent: bool,
-	) {
-		let meshes = if transparent {
-			&model.meshes.transparent
-		} else {
-			&model.meshes.opaque
-		};
-
-		self.set_vertex_buffer(1, model.instance_buffer.slice(..));
-
-		for mesh in meshes {
-			let mesh = mesh.resolve(&drum.meshes);
-			let material = mesh.material.resolve(&drum.materials);
-
-			self.draw_mesh_instanced(
-				mesh,
-				material,
-				0..model.instances.len() as u32,
-				camera_bind_group,
-				light_bind_group,
-				brdf_bind_group,
-			);
-		}
+		GpuModel::new(
+			device,
+			physics,
+			drum,
+			self.meshes.into(),
+			instances,
+			self.name,
+		)
 	}
 }

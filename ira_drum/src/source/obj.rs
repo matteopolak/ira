@@ -107,6 +107,8 @@ impl Source for ObjSource {
 		let mut centroid = Vec3::ZERO;
 		let mut num_vertices = 0;
 
+		let name = mem::take(&mut self.models[0].name);
+
 		for model in self.models {
 			let mesh = model.mesh;
 			let handle = material_handles[mesh.material_id.unwrap_or(0)];
@@ -170,6 +172,7 @@ impl Source for ObjSource {
 		centroid /= num_vertices as f32;
 
 		let model = Model {
+			name: name.into_boxed_str(),
 			meshes: MeshHandles {
 				opaque: opaque_meshes.into_boxed_slice(),
 				transparent: transparent_meshes.into_boxed_slice(),

@@ -3,31 +3,28 @@
 A general-purpose, code-first game engine.
 
 ```rust
-struct App;
+struct App {
+  car: InstanceRef,
+}
 
 impl ira::App for App {
-  fn init(&mut self, _window: &mut Window) -> Drum {
+  fn on_init(_window: &mut Window) -> Drum {
     Drum::from_path("car.drum").unwrap()
   }
 
-  fn on_ready(&mut self, state: &mut State) {
-    let model = &mut state.drum.models[0];
-
-    model.instances.push(Instance::default().with_up(Vec3::Z));
+  fn on_ready(ctx: &mut Context) -> Self {
+    Self {
+      car: ctx.add_instance(0, Instance::builder().up(Vec3::Z))
+    }
   }
 
-  fn on_frame(&mut self, state: &mut State, delta: Duration) {
-    let model = &mut state.drum.models[0];
-
-    // rotate the car model around the Y-axis
-    model.update_instance(0, |instance| {
-      instance.rotate_y(delta.as_secs_f32() * PI * 0.25);
-    });
+  fn on_update(&mut self, ctx: &mut Context, delta: Duration) {
+    self.car.update(ctx, |i, p| i.rotate_y(p, delta.as_secs_f32() * PI * 0.25));
   }
 }
 
 fn main() -> Result<(), EventLoopError> {
-  Game::new(App).run()
+  Game::<App>::default().run()
 }
 ```
 

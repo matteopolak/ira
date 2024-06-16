@@ -30,6 +30,11 @@ impl fmt::Display for Drum {
 		writeln!(f, "Material count: {}", self.materials.len())?;
 		writeln!(f, "Mesh count: {}", self.meshes.len())?;
 		writeln!(f, "Model count: {}", self.models.len())?;
+
+		for (i, model) in self.models.iter().enumerate() {
+			writeln!(f, "  {i}: {}", model.name)?;
+		}
+
 		writeln!(f, "Light count: {}", self.lights.len())?;
 		writeln!(f, "BRDF lut: {}", self.brdf_lut.is_some())?;
 		writeln!(f, "Irradiance map: {}", self.irradiance_map.is_some())?;

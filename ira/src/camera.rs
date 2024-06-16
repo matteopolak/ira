@@ -1,7 +1,7 @@
 use std::{f32::consts::FRAC_PI_2, time::Duration};
 
 use bytemuck::{Pod, Zeroable};
-use glam::{Mat4, Vec2, Vec3};
+use glam::{Mat4, Quat, Vec2, Vec3};
 use wgpu::util::DeviceExt;
 use winit::{event::ElementState, keyboard::KeyCode};
 
@@ -25,8 +25,7 @@ impl Projection {
 
 pub struct Settings {
 	pub position: Vec3,
-	pub yaw: f32,
-	pub pitch: f32,
+	pub rotation: Quat,
 
 	pub projection: Projection,
 }
@@ -36,8 +35,7 @@ impl Settings {
 	pub fn new(width: f32, height: f32) -> Self {
 		Self {
 			position: Vec3::new(-2.0, 0.0, 0.0),
-			yaw: 0f32.to_radians(),
-			pitch: 0f32.to_radians(),
+			rotation: Quat::from_rotation_y(-FRAC_PI_2),
 			projection: Projection {
 				aspect: width / height,
 				fovy: 40f32.to_radians(),
@@ -49,15 +47,14 @@ impl Settings {
 
 	#[must_use]
 	pub fn to_view_projection_matrix(&self) -> Mat4 {
-		let (sin_pitch, cos_pitch) = self.pitch.sin_cos();
-		let (sin_yaw, cos_yaw) = self.yaw.sin_cos();
+		let view = Mat4::look_at_rh(
+			self.position,
+			self.position + self.rotation * Vec3::Z,
+			Vec3::Y,
+		);
+		let proj = self.projection.to_perspective_matrix();
 
-		self.projection.to_perspective_matrix()
-			* Mat4::look_to_rh(
-				self.position,
-				Vec3::new(cos_pitch * cos_yaw, sin_pitch, cos_pitch * sin_yaw).normalize(),
-				Vec3::Y,
-			)
+		proj * view
 	}
 }
 
@@ -161,25 +158,12 @@ impl GpuCamera {
 pub struct Camera {
 	pub gpu: GpuCamera,
 	pub settings: Settings,
-
-	dir: Vec3,
-	rot: Vec2,
-
-	speed: f32,
-	sensitivity: f32,
 }
 
 impl Camera {
 	#[must_use]
 	pub fn new(gpu: GpuCamera, settings: Settings) -> Self {
-		Self {
-			gpu,
-			settings,
-			dir: Vec3::ZERO,
-			rot: Vec2::ZERO,
-			speed: 1.0,
-			sensitivity: 0.5,
-		}
+		Self { gpu, settings }
 	}
 
 	pub fn update_view_proj(&mut self, queue: &wgpu::Queue) {
@@ -190,54 +174,8 @@ impl Camera {
 		);
 	}
 
-	pub(crate) fn process_keyboard(&mut self, key: KeyCode, state: ElementState) -> bool {
-		let amount = if state.is_pressed() { 1.0 } else { 0.0 };
-
-		match key {
-			KeyCode::KeyW | KeyCode::ArrowUp => {
-				self.dir.z = amount;
-			}
-			KeyCode::KeyS | KeyCode::ArrowDown => {
-				self.dir.z = -amount;
-			}
-			KeyCode::KeyA | KeyCode::ArrowLeft => {
-				self.dir.x = -amount;
-			}
-			KeyCode::KeyD | KeyCode::ArrowRight => {
-				self.dir.x = amount;
-			}
-			KeyCode::Space => {
-				self.dir.y = amount;
-			}
-			KeyCode::ShiftLeft => {
-				self.dir.y = -amount;
-			}
-			_ => return false,
-		};
-
-		true
-	}
-
-	pub(crate) fn process_mouse(&mut self, delta: (f32, f32)) {
-		self.rot = Vec2::from(delta);
-	}
-
-	pub(crate) fn update(&mut self, delta: Duration) {
-		let dt = delta.as_secs_f32();
-
-		let (yaw_sin, yaw_cos) = self.settings.yaw.sin_cos();
-		let forward = Vec3::new(yaw_cos, 0.0, yaw_sin).normalize();
-		let right = forward.cross(Vec3::Y);
-		self.settings.position += self.dir.z * forward * self.speed * dt;
-		self.settings.position += self.dir.x * right * self.speed * dt;
-
-		self.settings.position.y += self.dir.y * self.speed * dt;
-
-		self.settings.yaw += self.rot.x * self.sensitivity * dt;
-		self.settings.pitch -= self.rot.y * self.sensitivity * dt;
-
-		self.rot = Vec2::ZERO;
-
-		self.settings.pitch = self.settings.pitch.clamp(-FRAC_PI_2, FRAC_PI_2);
+	pub fn apply(&mut self, position: Vec3, rotation: Quat) {
+		self.settings.position = position;
+		self.settings.rotation = rotation;
 	}
 }

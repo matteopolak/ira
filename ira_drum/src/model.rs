@@ -338,6 +338,8 @@ pub struct MeshHandles {
 
 #[derive(Debug, Encode, Decode)]
 pub struct Model {
+	pub name: Box<str>,
+
 	pub meshes: MeshHandles,
 	pub center: Vec3,
 }

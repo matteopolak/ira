@@ -8,7 +8,7 @@ use rapier3d::{
 	pipeline::PhysicsPipeline,
 };
 
-use crate::{game::Context, Body, GpuDrum, GpuInstance, Instance, InstanceBuilder};
+use crate::{game::Context, Body, GpuDrum, GpuInstance, GpuModel, Instance, InstanceBuilder};
 
 #[derive(Debug, Clone, Copy)]
 pub struct BoundingBox {
@@ -123,16 +123,23 @@ impl Context {
 				continue;
 			};
 
-			let instance: InstanceRef = body.user_data.into();
+			let instance: InstanceHandle = body.user_data.into();
+
+			instance.resolve_model_mut(&mut self.drum).dirty = true;
+
 			let (gpu, instance) = instance.resolve_mut(&mut self.drum);
 
 			*gpu = instance.to_gpu(&self.physics);
 		}
 	}
 
-	pub fn add_instance(&mut self, model_id: usize, mut instance: InstanceBuilder) -> InstanceRef {
+	pub fn add_instance(
+		&mut self,
+		model_id: usize,
+		mut instance: InstanceBuilder,
+	) -> InstanceHandle {
 		let model = &mut self.drum.models[model_id];
-		let handle = InstanceRef::new(model_id, model.instances.len());
+		let handle = InstanceHandle::new(model_id, model.instances.len());
 
 		let (axis, angle) = instance.rotation.to_axis_angle();
 
@@ -180,19 +187,19 @@ impl Context {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct InstanceRef {
+pub struct InstanceHandle {
 	model: usize,
 	instance: usize,
 }
 
-impl InstanceRef {
+impl InstanceHandle {
 	#[must_use]
 	pub fn new(model: usize, instance: usize) -> Self {
 		Self { model, instance }
 	}
 
 	pub fn resolve<'d>(&self, drum: &'d GpuDrum) -> (&'d GpuInstance, &'d Instance) {
-		let model = &drum.models[self.model];
+		let model = self.resolve_model(drum);
 
 		(
 			&model.instances[self.instance],
@@ -204,12 +211,21 @@ impl InstanceRef {
 		&self,
 		drum: &'d mut GpuDrum,
 	) -> (&'d mut GpuInstance, &'d mut Instance) {
-		let model = &mut drum.models[self.model];
+		let model = self.resolve_model_mut(drum);
 
 		(
 			&mut model.instances[self.instance],
 			&mut model.instance_data[self.instance],
 		)
+	}
+
+	#[must_use]
+	pub fn resolve_model<'d>(&self, drum: &'d GpuDrum) -> &'d GpuModel {
+		&drum.models[self.model]
+	}
+
+	pub fn resolve_model_mut<'d>(&self, drum: &'d mut GpuDrum) -> &'d mut GpuModel {
+		&mut drum.models[self.model]
 	}
 
 	pub fn update<F>(&self, ctx: &mut Context, update: F)
@@ -225,7 +241,7 @@ impl InstanceRef {
 	}
 }
 
-impl From<u128> for InstanceRef {
+impl From<u128> for InstanceHandle {
 	fn from(id: u128) -> Self {
 		Self {
 			model: (id >> 64) as usize,
@@ -234,8 +250,8 @@ impl From<u128> for InstanceRef {
 	}
 }
 
-impl From<InstanceRef> for u128 {
-	fn from(id: InstanceRef) -> u128 {
+impl From<InstanceHandle> for u128 {
+	fn from(id: InstanceHandle) -> u128 {
 		(id.model as u128) << 64 | id.instance as u128
 	}
 }

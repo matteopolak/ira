@@ -1,6 +1,6 @@
 use crate::{
-	camera, light, model::Instance, physics::PhysicsState, Camera, DrawModel, DrumExt, GpuDrum,
-	GpuTexture, MaterialExt, VertexExt,
+	camera, light, model::Instance, physics::PhysicsState, Camera, DrumExt, GpuDrum, GpuTexture,
+	MaterialExt, VertexExt,
 };
 
 use std::{
@@ -8,7 +8,7 @@ use std::{
 	time::{self, Duration},
 };
 
-use glam::Vec3;
+use glam::{Vec2, Vec3};
 use ira_drum::{Drum, Material, Vertex};
 use winit::{
 	application::ApplicationHandler,
@@ -28,7 +28,8 @@ pub trait App {
 	fn on_ready(ctx: &mut Context) -> Self;
 	/// Called once per frame, right before rendering.
 	fn on_update(&mut self, ctx: &mut Context, delta: Duration) {}
-	/// Called every 1/60th of a second.
+	/// Called every 1/60th of a second. If queued at the same time as an update,
+	/// this will always be called first.
 	fn on_fixed_update(&mut self, ctx: &mut Context) {}
 }
 
@@ -131,9 +132,13 @@ pub struct Context {
 	pub(crate) multisampled_texture: GpuTexture,
 
 	pub drum: GpuDrum,
-	pub(crate) physics: PhysicsState,
+	pub physics: PhysicsState,
 
 	pub(crate) desired_fps: f32,
+
+	pub(crate) pressed_keys: Vec<KeyCode>,
+	pub(crate) just_pressed: Vec<KeyCode>,
+	pub(crate) mouse_delta: Vec2,
 }
 
 async fn request_device(adapter: &wgpu::Adapter) -> (wgpu::Device, wgpu::Queue) {
@@ -233,6 +238,18 @@ fn create_pbr_render_pipelines(
 }
 
 impl Context {
+	pub fn pressed(&self, key: KeyCode) -> bool {
+		self.pressed_keys.contains(&key)
+	}
+
+	pub fn just_pressed(&self, key: KeyCode) -> bool {
+		self.just_pressed.contains(&key)
+	}
+
+	pub fn mouse_delta(&self) -> Vec2 {
+		self.mouse_delta
+	}
+
 	async fn new(window: Window, drum: Drum) -> Self {
 		let window = Arc::new(window);
 		let size = window.inner_size();
@@ -331,6 +348,10 @@ impl Context {
 			physics,
 
 			desired_fps: 120.0,
+
+			pressed_keys: Vec::new(),
+			just_pressed: Vec::new(),
+			mouse_delta: Vec2::ZERO,
 		}
 	}
 
@@ -349,11 +370,6 @@ impl Context {
 
 		self.surface.configure(&self.device, &self.config);
 		self.window.request_redraw();
-	}
-
-	fn update(&mut self, delta: time::Duration) {
-		self.camera.update(delta);
-		self.camera.update_view_proj(&self.queue);
 	}
 
 	fn render(&self) -> Result<(), wgpu::SurfaceError> {
@@ -394,9 +410,9 @@ impl Context {
 		rpass.set_pipeline(&self.opaque_render_pipeline);
 
 		for model in &self.drum.models {
-			rpass.draw_model_instanced(
+			model.draw_instanced(
+				&mut rpass,
 				&self.drum,
-				model,
 				&self.camera.gpu.bind_group,
 				&self.lights.bind_group,
 				&self.brdf_bind_group,
@@ -431,9 +447,9 @@ impl Context {
 		rpass.set_pipeline(&self.transparent_render_pipeline);
 
 		for model in &self.drum.models {
-			rpass.draw_model_instanced(
+			model.draw_instanced(
+				&mut rpass,
 				&self.drum,
-				model,
 				&self.camera.gpu.bind_group,
 				&self.lights.bind_group,
 				&self.brdf_bind_group,
@@ -489,9 +505,17 @@ impl<A: App> Game<A> {
 
 		let delta = ctx.last_frame.elapsed();
 
+		if delta.as_secs_f32() < 1.0 / ctx.desired_fps {
+			return;
+		}
+
 		ctx.last_frame = time::Instant::now();
-		ctx.update(delta);
+
 		app.on_update(ctx, delta);
+		ctx.camera.update_view_proj(&ctx.queue);
+
+		ctx.just_pressed.clear();
+		ctx.mouse_delta = Vec2::ZERO;
 
 		for model in &mut ctx.drum.models {
 			model.update_instance_buffer(&ctx.device, &ctx.queue);
@@ -535,7 +559,7 @@ impl<A: App> ApplicationHandler for Game<A> {
 		};
 
 		if let DeviceEvent::MouseMotion { delta } = event {
-			ctx.camera.process_mouse((delta.0 as f32, delta.1 as f32));
+			ctx.mouse_delta = (delta.0 as f32, delta.1 as f32).into();
 		}
 	}
 
@@ -584,13 +608,11 @@ impl<A: App> ApplicationHandler for Game<A> {
 					},
 				..
 			} => {
-				if ctx.camera.process_keyboard(key, state) {
-					return;
-				}
-
 				if state.is_pressed() {
+					ctx.pressed_keys.push(key);
+
 					match key {
-						KeyCode::Escape if false => {
+						KeyCode::Escape => {
 							ctx.window.set_cursor_grab(CursorGrabMode::None).unwrap();
 							ctx.window.set_cursor_visible(true);
 						}
@@ -603,6 +625,8 @@ impl<A: App> ApplicationHandler for Game<A> {
 						}
 						_ => {}
 					}
+				} else if let Some(index) = ctx.pressed_keys.iter().position(|&k| k == key) {
+					ctx.pressed_keys.swap_remove(index);
 				}
 			}
 			_ => {}

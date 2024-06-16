@@ -5,6 +5,7 @@ edition = "2021"
 license = "MIT"
 authors = ["Matthew Polak <git@matteopolak.com>"]
 description = "A general-purpose, code-first game engine."
+readme = "../README.md"
 
 [dependencies]
 anyhow = "1"
@@ -17,7 +18,7 @@ ira_drum.path = "../ira_drum"
 log = "0.4"
 nalgebra = { version = "0.32.6", features = ["convert-glam027"] }
 pollster = "0.3"
-rapier3d = "0.20.0"
+rapier3d = "0.20"
 wgpu = "0.20"
 winit = "0.30"
 

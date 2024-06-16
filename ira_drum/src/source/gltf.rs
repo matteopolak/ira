@@ -144,6 +144,12 @@ impl Source for GltfSource {
 		centroid /= num_vertices as f32;
 
 		let model = Model {
+			name: self
+				.root
+				.file_name()
+				.and_then(|f| f.to_str())
+				.unwrap_or("unnamed")
+				.into(),
 			meshes: MeshHandles {
 				opaque: opaque_meshes.into_boxed_slice(),
 				transparent: transparent_meshes.into_boxed_slice(),
