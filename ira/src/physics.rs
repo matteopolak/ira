@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use glam::Vec3;
 
-use crate::{game::State, GpuInstance, GpuModel, Instance};
+use crate::{game::State, GpuDrum, GpuInstance, GpuModel, Instance};
 
 #[derive(Debug, Clone, Copy)]
 pub enum BoundingBox {
@@ -11,6 +11,121 @@ pub enum BoundingBox {
 }
 
 impl BoundingBox {
+	#[must_use]
+	pub fn sweep(&self, other: &Self, velocity: Vec3) -> Option<f32> {
+		match (*self, *other) {
+			(
+				BoundingBox::Cuboid {
+					min: min_a,
+					max: max_a,
+				},
+				BoundingBox::Cuboid {
+					min: min_b,
+					max: max_b,
+				},
+			) => {
+				// AABB vs AABB sweep
+				let relative_velocity = velocity;
+				let mut t_min = -0.2f32;
+				let mut t_max = 0.01f32;
+
+				for i in 0..3 {
+					if relative_velocity[i] == 0.0 {
+						if min_a[i] > max_b[i] || max_a[i] < min_b[i] {
+							return None;
+						}
+					} else {
+						let inv = 1.0 / relative_velocity[i];
+
+						let mut t0 = (min_b[i] - max_a[i]) * inv;
+						let mut t1 = (max_b[i] - min_a[i]) * inv;
+
+						if t0 > t1 {
+							std::mem::swap(&mut t0, &mut t1);
+						}
+
+						t_min = t_min.max(t0);
+						t_max = t_max.min(t1);
+
+						if t_min > t_max {
+							return None;
+						}
+					}
+				}
+
+				Some(t_min)
+			}
+			(
+				BoundingBox::Sphere {
+					center: center_a,
+					radius: radius_a,
+				},
+				BoundingBox::Sphere {
+					center: center_b,
+					radius: radius_b,
+				},
+			) => {
+				// Sphere vs Sphere sweep
+				let radius = radius_a + radius_b;
+				let relative_velocity = velocity;
+				let distance = center_a - center_b;
+
+				let a = relative_velocity.length_squared();
+				let b = 2.0 * relative_velocity.dot(distance);
+				let c = distance.length_squared() - radius.powi(2);
+
+				let discriminant = b.powi(2) - 4.0 * a * c;
+
+				if discriminant < 0.0 {
+					return None;
+				}
+
+				let t = (-b - discriminant.sqrt()) / (2.0 * a);
+
+				if t < 0.0 {
+					return None;
+				}
+
+				Some(t)
+			}
+			(BoundingBox::Cuboid { min, max }, BoundingBox::Sphere { center, radius })
+			| (BoundingBox::Sphere { center, radius }, BoundingBox::Cuboid { min, max }) => {
+				// AABB vs Sphere sweep
+				let closest_point = Vec3::new(
+					center.x.clamp(min.x, max.x),
+					center.y.clamp(min.y, max.y),
+					center.z.clamp(min.z, max.z),
+				);
+
+				let distance = center - closest_point;
+				let distance_squared = distance.length_squared();
+
+				if distance_squared < radius.powi(2) {
+					return None;
+				}
+
+				let relative_velocity = velocity;
+				let a = relative_velocity.length_squared();
+				let b = 2.0 * relative_velocity.dot(distance);
+				let c = distance_squared - radius.powi(2);
+
+				let discriminant = b.powi(2) - 4.0 * a * c;
+
+				if discriminant < 0.0 {
+					return None;
+				}
+
+				let t = (-b - discriminant.sqrt()) / (2.0 * a);
+
+				if t < 0.0 {
+					return None;
+				}
+
+				Some(t)
+			}
+		}
+	}
+
 	#[must_use]
 	pub fn check_collision(&self, other: &Self) -> bool {
 		match (self, other) {
@@ -95,9 +210,24 @@ pub trait Physics {
 }
 
 #[derive(Debug, Clone, Copy)]
-struct InstanceRef {
+pub struct InstanceRef {
 	model: usize,
 	instance: usize,
+}
+
+impl InstanceRef {
+	pub fn new(model: usize, instance: usize) -> Self {
+		Self { model, instance }
+	}
+
+	pub fn resolve<'d>(&self, drum: &'d GpuDrum) -> (&'d GpuInstance, &'d Instance) {
+		let model = &drum.models[self.model];
+
+		(
+			&model.instances[self.instance],
+			&model.instance_data[self.instance],
+		)
+	}
 }
 
 fn broad_phase(models: &[GpuModel]) -> impl Iterator<Item = (InstanceRef, InstanceRef)> + '_ {
@@ -111,10 +241,15 @@ fn broad_phase(models: &[GpuModel]) -> impl Iterator<Item = (InstanceRef, Instan
 				(b.instances[instances..])
 					.iter()
 					.enumerate()
-					.map(move |(l, _y)| {
+					.filter_map(move |(l, _y)| {
 						let l = instances + l;
 
-						(
+						// if the first doesn't have velocity, skip it
+						if a.instance_data[j].velocity.length_squared() == 0.0 {
+							return None;
+						}
+
+						Some((
 							InstanceRef {
 								model: i,
 								instance: j,
@@ -123,7 +258,7 @@ fn broad_phase(models: &[GpuModel]) -> impl Iterator<Item = (InstanceRef, Instan
 								model: k,
 								instance: l,
 							},
-						)
+						))
 					})
 			})
 		})
@@ -185,23 +320,31 @@ impl Physics for State {
 			let ws_a = bounding_a.to_world_space(g_a.model());
 			let ws_b = bounding_b.to_world_space(g_b.model());
 
-			if ws_a.check_collision(&ws_b) {
-				// collision response
-				let normal = (a.position - b.position).normalize();
-				let relative_velocity = a.velocity - b.velocity;
+			if let Some(t) = ws_a.sweep(&ws_b, a.velocity - b.velocity) {
+				let t = t.min(delta.as_secs_f32());
 
-				let impulse = normal.dot(relative_velocity) * normal;
+				let position_a = a.position + a.velocity * t;
+				let position_b = b.position + b.velocity * t;
 
-				a.velocity -= impulse;
-				b.velocity += impulse;
+				let normal = (position_a - position_b).normalize();
 
-				// use last pos
-				a.position = a.last_position;
-				b.position = b.last_position;
+				let v_a = a.velocity - normal * a.velocity.dot(normal);
+				let v_b = b.velocity - normal * b.velocity.dot(normal);
 
-				// disable gravity
-				a.gravity = false;
-				b.gravity = false;
+				a.velocity = v_b + normal * v_a.dot(normal);
+				b.velocity = v_a + normal * v_b.dot(normal);
+
+				a.position = position_a;
+				b.position = position_b;
+			}
+		}
+
+		// update all gpu instances
+		for model in &mut self.drum.models {
+			for (instance, gpu_instance) in
+				model.instance_data.iter().zip(model.instances.iter_mut())
+			{
+				*gpu_instance = instance.to_gpu();
 			}
 		}
 	}
@@ -209,17 +352,14 @@ impl Physics for State {
 
 impl Physics for GpuModel {
 	fn update_physics(&mut self, delta: Duration) {
-		for (instance, gpu) in self.instance_data.iter_mut().zip(self.instances.iter_mut()) {
+		for instance in &mut self.instance_data {
 			instance.last_position = instance.position;
 
 			if instance.gravity {
-				instance.velocity.y -= 9.81 * delta.as_secs_f32() / 10.0;
+				instance.velocity.y -= 9.81 * delta.as_secs_f32();
 			}
 
-			if instance.velocity != Vec3::ZERO {
-				instance.position += instance.velocity * delta.as_secs_f32();
-				*gpu = instance.to_gpu();
-			}
+			instance.position += instance.velocity * delta.as_secs_f32();
 		}
 	}
 }

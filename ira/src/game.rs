@@ -344,9 +344,7 @@ impl State {
 
 	fn update(&mut self, delta: time::Duration) {
 		self.controller.update(delta);
-		self.controller
-			.camera
-			.update_view_proj(&self.controller.builder, &self.queue);
+		self.controller.update_view_proj(&self.queue, &self.drum);
 	}
 
 	fn render(&self) -> Result<(), wgpu::SurfaceError> {
@@ -580,13 +578,6 @@ impl<A: App> ApplicationHandler for Game<A> {
 			}
 			WindowEvent::MouseWheel { delta, .. } => {
 				state.controller.process_scroll(&delta);
-			}
-			WindowEvent::MouseInput {
-				state: element_state,
-				button: MouseButton::Left,
-				..
-			} => {
-				state.controller.mouse_pressed = element_state.is_pressed();
 			}
 			_ => {}
 		}

@@ -1,6 +1,6 @@
 struct CameraUniform {
-	view_proj: mat4x4<f32>,
-	view_pos: vec3<f32>,
+	projection: mat4x4<f32>,
+	position: vec3<f32>,
 }
 
 struct Light {
@@ -62,7 +62,7 @@ fn vs_main(model: VertexInput, instance: InstanceInput) -> VertexOutput {
 	var out: VertexOutput;
 
 	out.tex_coords = model.tex_coords;
-	out.clip_position = camera.view_proj * model_matrix * vec4<f32>(model.position, 1.0);
+	out.clip_position = camera.projection * model_matrix * vec4<f32>(model.position, 1.0);
 	out.world_position = (model_matrix * vec4<f32>(model.position, 1.0)).xyz;
 	
 	let world_tangent = normalize((model_matrix * vec4<f32>(model.tangent, 0.0)).xyz);
@@ -159,7 +159,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 		in.tbn_matrix_2,
 	);
 	let n = normalize(tbn * (2.0 * normal_map - 1.0));
-	let v = normalize(camera.view_pos - in.world_position);
+	let v = normalize(camera.position - in.world_position);
 	let f0 = mix(vec3<f32>(0.04), albedo.rgb, metallic);
 
 	var lo = vec3<f32>(0.0);

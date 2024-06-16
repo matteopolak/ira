@@ -88,7 +88,6 @@ pub struct GpuModel {
 	pub instance_buffer: wgpu::Buffer,
 
 	last_instance_count: usize,
-	changed: bool,
 
 	// INVARIANT: `instances` and `instance_data` are the same length.
 	pub(crate) instances: Vec<GpuInstance>,
@@ -111,7 +110,6 @@ impl GpuModel {
 			meshes,
 			instance_buffer: Self::create_instance_buffer(device, &gpu_instances),
 			last_instance_count: instances.len(),
-			changed: false,
 			instances: gpu_instances,
 			instance_data: instances,
 
@@ -129,8 +127,6 @@ impl GpuModel {
 		F: FnOnce(&mut Instance),
 	{
 		update(&mut self.instance_data[index]);
-		self.instances[index] = self.instance_data[index].to_gpu();
-		self.changed = true;
 	}
 
 	#[must_use]
@@ -154,15 +150,15 @@ impl GpuModel {
 	///
 	/// If the number of instances has changed, the buffer is recreated.
 	pub fn update_instance_buffer(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) {
-		if self.instances.len() != self.last_instance_count {
-			self.recreate_instance_buffer(device);
-			self.last_instance_count = self.instances.len();
-		} else if self.changed {
+		if self.instances.len() == self.last_instance_count {
 			queue.write_buffer(
 				&self.instance_buffer,
 				0,
 				bytemuck::cast_slice(&self.instances),
 			);
+		} else {
+			self.recreate_instance_buffer(device);
+			self.last_instance_count = self.instances.len();
 		}
 	}
 }
@@ -252,10 +248,6 @@ impl Instance {
 		self
 	}
 
-	pub fn rotate_y(&mut self, rad: f32) {
-		self.rotation = Quat::from_rotation_y(rad) * self.rotation;
-	}
-
 	/// Rotates the instance such that `up` rotates the instance to the up vector
 	/// of the engine (which is `Vec3::Y`).
 	///
@@ -264,6 +256,15 @@ impl Instance {
 	pub fn with_up(mut self, up: Vec3) -> Self {
 		self.rotation = Quat::from_rotation_arc(up, Vec3::Y);
 		self
+	}
+
+	pub fn with_rotation(mut self, rotation: Quat) -> Self {
+		self.rotation = rotation * self.rotation;
+		self
+	}
+
+	pub fn rotate_y(&mut self, rad: f32) {
+		self.rotation = Quat::from_rotation_y(rad) * self.rotation;
 	}
 
 	pub fn to_gpu(&self) -> GpuInstance {

@@ -16,6 +16,7 @@ image = "0.25"
 ira_drum.path = "../ira_drum"
 log = "0.4"
 pollster = "0.3"
+rapier3d = "0.20.0"
 wgpu = "0.20"
 winit = "0.30"
 

@@ -1,12 +1,14 @@
 use std::{f32::consts::FRAC_PI_2, time::Duration};
 
 use bytemuck::{Pod, Zeroable};
-use glam::{Mat4, Vec2, Vec3};
+use glam::{Mat4, Quat, Vec2, Vec3};
 use wgpu::util::DeviceExt;
 use winit::{
 	event::{ElementState, MouseScrollDelta},
 	keyboard::KeyCode,
 };
+
+use crate::{physics::InstanceRef, GpuDrum};
 
 pub struct Projection {
 	pub aspect: f32,
@@ -66,32 +68,24 @@ impl CameraBuilder {
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, Pod, Zeroable)]
-pub struct Camera {
-	view_proj: [[f32; 4]; 4],
-	view_pos: [f32; 3],
+pub struct CameraUniform {
+	projection: [[f32; 4]; 4],
+	position: [f32; 3],
 	_padding: u32,
 }
 
-impl Camera {
-	#[must_use]
-	pub fn new(camera: &CameraBuilder) -> Self {
-		let vp_matrix = camera.to_view_projection_matrix();
-
+impl Default for CameraUniform {
+	fn default() -> Self {
 		Self {
-			view_proj: vp_matrix.to_cols_array_2d(),
-			view_pos: camera.position.into(),
+			projection: Mat4::IDENTITY.to_cols_array_2d(),
+			position: Vec3::ZERO.into(),
 			_padding: 0,
 		}
 	}
+}
 
-	fn update_view_proj(&mut self, camera: &CameraBuilder) {
-		let vp_matrix = camera.to_view_projection_matrix();
-
-		self.view_proj = vp_matrix.to_cols_array_2d();
-		self.view_pos = camera.position.into();
-	}
-
-	pub fn create_on_device(self, device: &wgpu::Device) -> GpuCamera {
+impl CameraUniform {
+	pub fn into_gpu(self, device: &wgpu::Device) -> GpuCamera {
 		let camera_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
 			label: Some("Camera Buffer"),
 			contents: bytemuck::cast_slice(&[self]),
@@ -133,15 +127,16 @@ impl Camera {
 
 #[must_use]
 pub struct GpuCamera {
-	pub uniform: Camera,
+	pub uniform: CameraUniform,
 	pub buffer: wgpu::Buffer,
 	pub bind_group: wgpu::BindGroup,
 	pub bind_group_layout: wgpu::BindGroupLayout,
 }
 
 impl GpuCamera {
-	pub fn update_view_proj(&mut self, camera: &CameraBuilder, queue: &wgpu::Queue) {
-		self.uniform.update_view_proj(camera);
+	fn update(&mut self, queue: &wgpu::Queue, rotation: Quat, position: Vec3) {
+		self.uniform.position = position.into();
+		self.uniform.projection = Mat4::from_quat(rotation).to_cols_array_2d();
 
 		queue.write_buffer(&self.buffer, 0, bytemuck::cast_slice(&[self.uniform]));
 	}
@@ -166,10 +161,9 @@ pub struct CameraController {
 	rot: Vec2,
 
 	speed: f32,
-	scroll: f32,
 	sensitivity: f32,
 
-	pub mouse_pressed: bool,
+	instance: Option<InstanceRef>,
 }
 
 impl CameraController {
@@ -181,10 +175,25 @@ impl CameraController {
 			dir: Vec3::ZERO,
 			rot: Vec2::ZERO,
 			speed: 1.0,
-			scroll: 0.0,
 			sensitivity: 0.5,
-			mouse_pressed: false,
+			instance: None,
 		}
+	}
+
+	pub fn update_view_proj(&mut self, queue: &wgpu::Queue, drum: &GpuDrum) {
+		let transform = if let Some(instance) = self.instance {
+			instance.resolve(drum).0.model()
+		} else {
+			Mat4::IDENTITY
+		};
+
+		self.camera.update_view_proj(&self.builder, transform);
+
+		queue.write_buffer(
+			&self.camera.buffer,
+			0,
+			bytemuck::cast_slice(&[self.camera.uniform]),
+		);
 	}
 
 	pub fn process_keyboard(&mut self, key: KeyCode, state: ElementState) -> bool {
@@ -219,16 +228,7 @@ impl CameraController {
 		self.rot = Vec2::from(delta);
 	}
 
-	pub fn process_scroll(&mut self, delta: &MouseScrollDelta) {
-		match delta {
-			MouseScrollDelta::LineDelta(_, y) => {
-				self.scroll += y * 100.;
-			}
-			MouseScrollDelta::PixelDelta(pos) => {
-				self.scroll += pos.y as f32;
-			}
-		}
-	}
+	pub fn process_scroll(&mut self, _delta: &MouseScrollDelta) {}
 
 	pub fn update(&mut self, delta: Duration) {
 		let dt = delta.as_secs_f32();
@@ -240,12 +240,6 @@ impl CameraController {
 		self.builder.position += self.dir.z * forward * self.speed * dt;
 		self.builder.position += self.dir.x * right * self.speed * dt;
 
-		let (pitch_sin, pitch_cos) = self.builder.pitch.sin_cos();
-		let scrollward = Vec3::new(pitch_cos * yaw_cos, pitch_sin, pitch_cos * yaw_sin).normalize();
-
-		self.builder.position += self.scroll * scrollward * self.speed * dt;
-		self.scroll = 0.0;
-
 		self.builder.position.y += self.dir.y * self.speed * dt;
 
 		self.builder.yaw += self.rot.x * self.sensitivity * dt;
@@ -254,5 +248,9 @@ impl CameraController {
 		self.rot = Vec2::ZERO;
 
 		self.builder.pitch = self.builder.pitch.clamp(-FRAC_PI_2, FRAC_PI_2);
+	}
+
+	pub fn attach_to(&mut self, instance: InstanceRef) {
+		self.instance = Some(instance);
 	}
 }
