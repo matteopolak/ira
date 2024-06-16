@@ -8,7 +8,7 @@ use rapier3d::{
 	pipeline::PhysicsPipeline,
 };
 
-use crate::{game::State, GpuDrum, GpuInstance, Instance, InstanceBuilder};
+use crate::{game::Context, Body, GpuDrum, GpuInstance, Instance, InstanceBuilder};
 
 #[derive(Debug, Clone, Copy)]
 pub struct BoundingBox {
@@ -86,11 +86,12 @@ impl PhysicsState {
 	/// Modifies the provided instance to include the rigid body and collider handles.
 	fn add_instance(&mut self, instance: InstanceBuilder) -> Instance {
 		let mut new_instance = Instance {
-			position: instance.position,
-			rotation: instance.rotation,
 			scale: instance.scale,
 			collider: None,
-			rigidbody: None,
+			body: Body::Static {
+				position: instance.position,
+				rotation: instance.rotation,
+			},
 		};
 
 		if let Some(body) = instance.rigidbody {
@@ -104,7 +105,7 @@ impl PhysicsState {
 				));
 			}
 
-			new_instance.rigidbody = Some(body);
+			new_instance.body = Body::Rigid(body);
 		} else if let Some(collider) = instance.collider {
 			new_instance.collider = Some(self.colliders.insert(collider.mass(1.0)));
 		}
@@ -113,7 +114,7 @@ impl PhysicsState {
 	}
 }
 
-impl State {
+impl Context {
 	pub fn physics_update(&mut self) {
 		self.physics.step();
 
@@ -123,12 +124,7 @@ impl State {
 			};
 
 			let instance: InstanceRef = body.user_data.into();
-
 			let (gpu, instance) = instance.resolve_mut(&mut self.drum);
-			let position = body.position();
-
-			instance.position = position.translation.vector.into();
-			instance.rotation = position.rotation.into();
 
 			*gpu = instance.to_gpu(&self.physics);
 		}
@@ -136,21 +132,42 @@ impl State {
 
 	pub fn add_instance(&mut self, model_id: usize, mut instance: InstanceBuilder) -> InstanceRef {
 		let model = &mut self.drum.models[model_id];
-
-		if instance.collider.is_none() {
-			instance.collider = Some(model.bounds.to_cuboid(instance.scale));
-		}
-
 		let handle = InstanceRef::new(model_id, model.instances.len());
 
-		if let Some(body) = instance.rigidbody {
-			let (axis, angle) = instance.rotation.to_axis_angle();
+		let (axis, angle) = instance.rotation.to_axis_angle();
 
-			instance.rigidbody = Some(
-				body.position(instance.position.into())
-					.rotation((axis * angle).into())
-					.user_data(handle.into()),
-			);
+		match (instance.rigidbody, instance.collider) {
+			(Some(body), collider) => {
+				if collider.is_none() {
+					instance.collider = Some(model.bounds.to_cuboid(instance.scale));
+				} else {
+					instance.collider = collider;
+				}
+
+				instance.rigidbody = Some(
+					body.position(instance.position.into())
+						.rotation((axis * angle).into())
+						.user_data(handle.into()),
+				);
+			}
+			(body, Some(collider)) => {
+				instance.rigidbody = body;
+				instance.collider = Some(
+					collider
+						.position(instance.position.into())
+						.rotation((axis * angle).into()),
+				);
+			}
+			(body, None) => {
+				instance.rigidbody = body;
+				instance.collider = Some(
+					model
+						.bounds
+						.to_cuboid(instance.scale)
+						.position(instance.position.into())
+						.rotation((axis * angle).into()),
+				);
+			}
 		}
 
 		let instance = self.physics.add_instance(instance);
@@ -193,6 +210,18 @@ impl InstanceRef {
 			&mut model.instances[self.instance],
 			&mut model.instance_data[self.instance],
 		)
+	}
+
+	pub fn update<F>(&self, ctx: &mut Context, update: F)
+	where
+		F: FnOnce(&mut Instance, &mut PhysicsState),
+	{
+		let (gpu, instance) = self.resolve_mut(&mut ctx.drum);
+
+		update(instance, &mut ctx.physics);
+		*gpu = instance.to_gpu(&ctx.physics);
+
+		ctx.drum.models[self.model].dirty = true;
 	}
 }
 

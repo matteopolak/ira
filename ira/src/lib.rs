@@ -18,7 +18,7 @@ pub mod texture;
 
 pub use camera::*;
 pub use drum::*;
-pub use game::{App, Game};
+pub use game::{App, Context, Game};
 pub use light::*;
 pub use material::*;
 pub use model::*;
@@ -28,5 +28,4 @@ pub use glam;
 pub use ira_drum::*;
 pub use pollster;
 pub use rapier3d::prelude::*;
-pub use wgpu;
 pub use winit;

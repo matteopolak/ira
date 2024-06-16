@@ -92,16 +92,17 @@ impl From<ira_drum::MeshHandles> for GpuMeshHandles {
 
 #[derive(Debug)]
 pub struct GpuModel {
-	pub meshes: GpuMeshHandles,
-	pub instance_buffer: wgpu::Buffer,
-
-	last_instance_count: usize,
+	pub(crate) meshes: GpuMeshHandles,
+	pub(crate) instance_buffer: wgpu::Buffer,
 
 	// INVARIANT: `instances` and `instance_data` are the same length.
 	pub(crate) instances: Vec<GpuInstance>,
 	pub(crate) instance_data: Vec<Instance>,
 
 	pub(crate) bounds: BoundingBox,
+
+	last_instance_count: usize,
+	pub(crate) dirty: bool,
 }
 
 impl GpuModel {
@@ -127,14 +128,8 @@ impl GpuModel {
 			instance_data: instances,
 
 			bounds: BoundingBox { min, max },
+			dirty: false,
 		}
-	}
-
-	pub fn update_instance<F>(&mut self, index: usize, update: F)
-	where
-		F: FnOnce(&mut Instance),
-	{
-		update(&mut self.instance_data[index]);
 	}
 
 	#[must_use]
@@ -158,15 +153,15 @@ impl GpuModel {
 	///
 	/// If the number of instances has changed, the buffer is recreated.
 	pub fn update_instance_buffer(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) {
-		if self.instances.len() == self.last_instance_count {
+		if self.instances.len() != self.last_instance_count {
+			self.recreate_instance_buffer(device);
+			self.last_instance_count = self.instances.len();
+		} else if self.dirty {
 			queue.write_buffer(
 				&self.instance_buffer,
 				0,
 				bytemuck::cast_slice(&self.instances),
 			);
-		} else {
-			self.recreate_instance_buffer(device);
-			self.last_instance_count = self.instances.len();
 		}
 	}
 }
@@ -235,14 +230,39 @@ impl InstanceBuilder {
 	}
 }
 
+#[derive(Debug)]
+pub enum Body {
+	Static { position: Vec3, rotation: Quat },
+	Rigid(RigidBodyHandle),
+}
+
+impl Body {
+	pub fn rotate_y(&mut self, physics: &mut PhysicsState, rad: f32) {
+		match self {
+			Self::Static { rotation, .. } => *rotation = Quat::from_rotation_y(rad) * *rotation,
+			Self::Rigid(handle) => {
+				let Some(body) = physics.rigid_bodies.get_mut(*handle) else {
+					return;
+				};
+				let current_rotation: Quat = body.position().rotation.into();
+				let new_rotation = Quat::from_rotation_y(rad) * current_rotation;
+
+				if body.is_kinematic() {
+					body.set_next_kinematic_rotation(new_rotation.into());
+				} else {
+					body.set_rotation(new_rotation.into(), true);
+				}
+			}
+		}
+	}
+}
+
 #[must_use]
 #[derive(Debug)]
 pub struct Instance {
-	pub position: Vec3,
-	pub rotation: Quat,
 	pub scale: Vec3,
 
-	pub rigidbody: Option<RigidBodyHandle>,
+	pub body: Body,
 	pub collider: Option<ColliderHandle>,
 }
 
@@ -263,15 +283,22 @@ impl Instance {
 		}
 	}
 
-	pub fn to_gpu(&self, physics: &PhysicsState) -> GpuInstance {
-		let (rotation, position) =
-			if let Some(rigidbody) = self.rigidbody.and_then(|h| physics.rigid_bodies.get(h)) {
-				let position = rigidbody.position();
+	pub fn builder() -> InstanceBuilder {
+		InstanceBuilder::default()
+	}
 
-				(position.rotation.into(), position.translation.vector.into())
-			} else {
-				(self.rotation, self.position)
-			};
+	pub fn to_gpu(&self, physics: &PhysicsState) -> GpuInstance {
+		let (position, rotation) = match self.body {
+			Body::Rigid(handle) => {
+				let position = physics
+					.rigid_bodies
+					.get(handle)
+					.map_or_else(Default::default, |r| *r.position());
+
+				(position.translation.vector.into(), position.rotation.into())
+			}
+			Body::Static { position, rotation } => (position, rotation),
+		};
 
 		GpuInstance {
 			model: Mat4::from_scale_rotation_translation(self.scale, rotation, position)
@@ -279,8 +306,8 @@ impl Instance {
 		}
 	}
 
-	pub fn rotate_y(&mut self, rad: f32) {
-		self.rotation = Quat::from_rotation_y(rad) * self.rotation;
+	pub fn rotate_y(&mut self, physics: &mut PhysicsState, rad: f32) {
+		self.body.rotate_y(physics, rad);
 	}
 }
 

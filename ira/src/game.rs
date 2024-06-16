@@ -1,8 +1,6 @@
 use crate::{
-	camera, light,
-	model::{DrawModel, Instance},
-	physics::PhysicsState,
-	Camera, DrumExt, GpuDrum, GpuTexture, MaterialExt, VertexExt,
+	camera, light, model::Instance, physics::PhysicsState, Camera, DrawModel, DrumExt, GpuDrum,
+	GpuTexture, MaterialExt, VertexExt,
 };
 
 use std::{
@@ -20,28 +18,31 @@ use winit::{
 	window::{CursorGrabMode, Fullscreen, Window, WindowAttributes, WindowId},
 };
 
+#[allow(unused_variables)]
 pub trait App {
 	/// Called once at the start of the program, right after the window
 	/// is created but before anything else is done.
-	fn init(&mut self, window: &mut Window) -> Drum;
+	fn on_init(window: &mut Window) -> Drum;
 
 	/// Called once when everything has been created on the GPU.
-	fn on_ready(&mut self, state: &mut State);
-	/// Called once per frame.
-	fn on_frame(&mut self, state: &mut State, delta: Duration);
+	fn on_ready(ctx: &mut Context) -> Self;
+	/// Called once per frame, right before rendering.
+	fn on_update(&mut self, ctx: &mut Context, delta: Duration) {}
+	/// Called every 1/60th of a second.
+	fn on_fixed_update(&mut self, ctx: &mut Context) {}
 }
 
-pub struct Game<A: App> {
-	state: Option<State>,
-	app: A,
+pub struct Game<A> {
+	state: Option<(Context, A)>,
+}
+
+impl<A> Default for Game<A> {
+	fn default() -> Self {
+		Self { state: None }
+	}
 }
 
 impl<A: App> Game<A> {
-	/// Creates a new game.
-	pub fn new(app: A) -> Self {
-		Self { state: None, app }
-	}
-
 	/// Runs the application.
 	///
 	/// This function will block the current thread until the application is closed.
@@ -104,35 +105,35 @@ fn create_render_pipeline(
 	})
 }
 
-pub struct State {
+/// The game context, containing all game-related data.
+pub struct Context {
 	pub window: Arc<Window>,
-	pub device: wgpu::Device,
-	pub queue: wgpu::Queue,
-	pub surface: wgpu::Surface<'static>,
-	pub config: wgpu::SurfaceConfiguration,
+	pub camera: Camera,
 
-	pub material_bind_group_layout: wgpu::BindGroupLayout,
-	pub brdf_bind_group: wgpu::BindGroup,
+	pub(crate) device: wgpu::Device,
+	pub(crate) queue: wgpu::Queue,
+	pub(crate) surface: wgpu::Surface<'static>,
+	pub(crate) config: wgpu::SurfaceConfiguration,
+
+	pub(crate) brdf_bind_group: wgpu::BindGroup,
 
 	opaque_render_pipeline: wgpu::RenderPipeline,
 	transparent_render_pipeline: wgpu::RenderPipeline,
 
-	pub camera: Camera,
-
-	depth_texture: GpuTexture,
+	pub(crate) depth_texture: GpuTexture,
 
 	lights: light::Lights,
 
 	last_frame: time::Instant,
 	last_physics: time::Instant,
-	pub sample_count: u32,
 
-	multisampled_texture: GpuTexture,
+	pub(crate) sample_count: u32,
+	pub(crate) multisampled_texture: GpuTexture,
 
 	pub drum: GpuDrum,
-	pub physics: PhysicsState,
+	pub(crate) physics: PhysicsState,
 
-	pub desired_fps: f32,
+	pub(crate) desired_fps: f32,
 }
 
 async fn request_device(adapter: &wgpu::Adapter) -> (wgpu::Device, wgpu::Queue) {
@@ -231,7 +232,7 @@ fn create_pbr_render_pipelines(
 	(opaque_render_pipeline, transparent_render_pipeline)
 }
 
-impl State {
+impl Context {
 	async fn new(window: Window, drum: Drum) -> Self {
 		let window = Arc::new(window);
 		let size = window.inner_size();
@@ -313,8 +314,6 @@ impl State {
 
 			opaque_render_pipeline,
 			transparent_render_pipeline,
-
-			material_bind_group_layout,
 
 			brdf_bind_group,
 
@@ -475,40 +474,37 @@ impl State {
 
 impl<A: App> Game<A> {
 	fn render(&mut self, event_loop: &ActiveEventLoop) {
-		let Some(state) = self.state.as_mut() else {
+		let Some((ctx, app)) = self.state.as_mut() else {
 			return;
 		};
 
-		let delta = state.last_physics.elapsed();
+		let delta = ctx.last_physics.elapsed();
 
 		// physics 60fps
 		if delta.as_secs_f32() >= 1.0 / 60.0 {
-			state.last_physics = time::Instant::now();
-			state.physics_update();
+			ctx.last_physics = time::Instant::now();
+			ctx.physics_update();
+			app.on_fixed_update(ctx);
 		}
 
-		let delta = state.last_frame.elapsed();
+		let delta = ctx.last_frame.elapsed();
 
-		state.last_frame = time::Instant::now();
+		ctx.last_frame = time::Instant::now();
+		ctx.update(delta);
+		app.on_update(ctx, delta);
 
-		state.update(delta);
-		self.app.on_frame(state, delta);
-
-		// TODO: only update instances that have changed
-		for model in &mut state.drum.models {
-			model.update_instance_buffer(&state.device, &state.queue);
+		for model in &mut ctx.drum.models {
+			model.update_instance_buffer(&ctx.device, &ctx.queue);
 		}
 
-		match state.render() {
+		match ctx.render() {
 			Ok(..) => {}
 			Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
-				state.resize(state.window.inner_size());
+				ctx.resize(ctx.window.inner_size());
 			}
 			Err(wgpu::SurfaceError::OutOfMemory) => event_loop.exit(),
 			Err(wgpu::SurfaceError::Timeout) => log::warn!("surface timeout"),
 		}
-
-		println!("fps: {}", 1.0 / delta.as_secs_f32());
 	}
 }
 
@@ -521,11 +517,11 @@ impl<A: App> ApplicationHandler for Game<A> {
 		window.set_cursor_grab(CursorGrabMode::Locked).unwrap();
 		window.set_cursor_visible(false);
 
-		let drum = self.app.init(&mut window);
-		let mut state = pollster::block_on(State::new(window, drum));
+		let drum = A::on_init(&mut window);
+		let mut ctx = pollster::block_on(Context::new(window, drum));
+		let app = A::on_ready(&mut ctx);
 
-		self.app.on_ready(&mut state);
-		self.state = Some(state);
+		self.state = Some((ctx, app));
 	}
 
 	fn device_event(
@@ -534,21 +530,21 @@ impl<A: App> ApplicationHandler for Game<A> {
 		_device_id: winit::event::DeviceId,
 		event: DeviceEvent,
 	) {
-		let Some(app) = self.state.as_mut() else {
+		let Some((ctx, _)) = self.state.as_mut() else {
 			return;
 		};
 
 		if let DeviceEvent::MouseMotion { delta } = event {
-			app.camera.process_mouse((delta.0 as f32, delta.1 as f32));
+			ctx.camera.process_mouse((delta.0 as f32, delta.1 as f32));
 		}
 	}
 
 	fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
-		let Some(state) = self.state.as_mut() else {
+		let Some((ctx, _)) = self.state.as_mut() else {
 			return;
 		};
 
-		if state.last_frame.elapsed().as_secs_f32() < 1.0 / state.desired_fps {
+		if ctx.last_frame.elapsed().as_secs_f32() < 1.0 / ctx.desired_fps {
 			return;
 		}
 
@@ -561,17 +557,17 @@ impl<A: App> ApplicationHandler for Game<A> {
 		window_id: WindowId,
 		event: WindowEvent,
 	) {
-		let Some(state) = self.state.as_mut() else {
+		let Some((ctx, _)) = self.state.as_mut() else {
 			return;
 		};
 
-		if window_id != state.window.id() {
+		if window_id != ctx.window.id() {
 			return;
 		}
 
 		match event {
 			WindowEvent::Resized(size) => {
-				state.resize(size);
+				ctx.resize(size);
 			}
 			WindowEvent::RedrawRequested => {
 				self.render(event_loop);
@@ -582,29 +578,28 @@ impl<A: App> ApplicationHandler for Game<A> {
 			WindowEvent::KeyboardInput {
 				event:
 					KeyEvent {
-						state: element_state,
+						state,
 						physical_key: PhysicalKey::Code(key),
 						..
 					},
 				..
 			} => {
-				if state.camera.process_keyboard(key, element_state) {
+				if ctx.camera.process_keyboard(key, state) {
 					return;
 				}
 
-				if element_state.is_pressed() {
+				if state.is_pressed() {
 					match key {
 						KeyCode::Escape if false => {
-							state.window.set_cursor_grab(CursorGrabMode::None).unwrap();
-							state.window.set_cursor_visible(true);
+							ctx.window.set_cursor_grab(CursorGrabMode::None).unwrap();
+							ctx.window.set_cursor_visible(true);
 						}
-						KeyCode::F11 if state.window.fullscreen().is_none() => {
-							state
-								.window
+						KeyCode::F11 if ctx.window.fullscreen().is_none() => {
+							ctx.window
 								.set_fullscreen(Some(Fullscreen::Borderless(None)));
 						}
 						KeyCode::F11 => {
-							state.window.set_fullscreen(None);
+							ctx.window.set_fullscreen(None);
 						}
 						_ => {}
 					}
