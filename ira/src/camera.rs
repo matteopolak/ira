@@ -1,14 +1,9 @@
 use std::{f32::consts::FRAC_PI_2, time::Duration};
 
 use bytemuck::{Pod, Zeroable};
-use glam::{Mat4, Quat, Vec2, Vec3};
+use glam::{Mat4, Vec2, Vec3};
 use wgpu::util::DeviceExt;
-use winit::{
-	event::{ElementState, MouseScrollDelta},
-	keyboard::KeyCode,
-};
-
-use crate::{physics::InstanceRef, GpuDrum};
+use winit::{event::ElementState, keyboard::KeyCode};
 
 pub struct Projection {
 	pub aspect: f32,
@@ -28,7 +23,7 @@ impl Projection {
 	}
 }
 
-pub struct CameraBuilder {
+pub struct Settings {
 	pub position: Vec3,
 	pub yaw: f32,
 	pub pitch: f32,
@@ -36,7 +31,7 @@ pub struct CameraBuilder {
 	pub projection: Projection,
 }
 
-impl CameraBuilder {
+impl Settings {
 	#[must_use]
 	pub fn new(width: f32, height: f32) -> Self {
 		Self {
@@ -85,6 +80,15 @@ impl Default for CameraUniform {
 }
 
 impl CameraUniform {
+	#[must_use]
+	pub fn from_settings(settings: &Settings) -> Self {
+		Self {
+			projection: settings.to_view_projection_matrix().to_cols_array_2d(),
+			position: settings.position.into(),
+			_padding: 0,
+		}
+	}
+
 	pub fn into_gpu(self, device: &wgpu::Device) -> GpuCamera {
 		let camera_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
 			label: Some("Camera Buffer"),
@@ -127,16 +131,17 @@ impl CameraUniform {
 
 #[must_use]
 pub struct GpuCamera {
-	pub uniform: CameraUniform,
+	pub(crate) uniform: CameraUniform,
+
 	pub buffer: wgpu::Buffer,
 	pub bind_group: wgpu::BindGroup,
 	pub bind_group_layout: wgpu::BindGroupLayout,
 }
 
 impl GpuCamera {
-	fn update(&mut self, queue: &wgpu::Queue, rotation: Quat, position: Vec3) {
+	fn update(&mut self, queue: &wgpu::Queue, rotation: Mat4, position: Vec3) {
 		self.uniform.position = position.into();
-		self.uniform.projection = Mat4::from_quat(rotation).to_cols_array_2d();
+		self.uniform.projection = rotation.to_cols_array_2d();
 
 		queue.write_buffer(&self.buffer, 0, bytemuck::cast_slice(&[self.uniform]));
 	}
@@ -153,50 +158,39 @@ impl GpuCamera {
 	}
 }
 
-pub struct CameraController {
-	pub camera: GpuCamera,
-	pub builder: CameraBuilder,
+pub struct Camera {
+	pub gpu: GpuCamera,
+	pub settings: Settings,
 
 	dir: Vec3,
 	rot: Vec2,
 
 	speed: f32,
 	sensitivity: f32,
-
-	instance: Option<InstanceRef>,
 }
 
-impl CameraController {
+impl Camera {
 	#[must_use]
-	pub fn new(camera: GpuCamera, builder: CameraBuilder) -> Self {
+	pub fn new(gpu: GpuCamera, settings: Settings) -> Self {
 		Self {
-			camera,
-			builder,
+			gpu,
+			settings,
 			dir: Vec3::ZERO,
 			rot: Vec2::ZERO,
 			speed: 1.0,
 			sensitivity: 0.5,
-			instance: None,
 		}
 	}
 
-	pub fn update_view_proj(&mut self, queue: &wgpu::Queue, drum: &GpuDrum) {
-		let transform = if let Some(instance) = self.instance {
-			instance.resolve(drum).0.model()
-		} else {
-			Mat4::IDENTITY
-		};
-
-		self.camera.update_view_proj(&self.builder, transform);
-
-		queue.write_buffer(
-			&self.camera.buffer,
-			0,
-			bytemuck::cast_slice(&[self.camera.uniform]),
+	pub fn update_view_proj(&mut self, queue: &wgpu::Queue) {
+		self.gpu.update(
+			queue,
+			self.settings.to_view_projection_matrix(),
+			self.settings.position,
 		);
 	}
 
-	pub fn process_keyboard(&mut self, key: KeyCode, state: ElementState) -> bool {
+	pub(crate) fn process_keyboard(&mut self, key: KeyCode, state: ElementState) -> bool {
 		let amount = if state.is_pressed() { 1.0 } else { 0.0 };
 
 		match key {
@@ -224,33 +218,26 @@ impl CameraController {
 		true
 	}
 
-	pub fn process_mouse(&mut self, delta: (f32, f32)) {
+	pub(crate) fn process_mouse(&mut self, delta: (f32, f32)) {
 		self.rot = Vec2::from(delta);
 	}
 
-	pub fn process_scroll(&mut self, _delta: &MouseScrollDelta) {}
-
-	pub fn update(&mut self, delta: Duration) {
+	pub(crate) fn update(&mut self, delta: Duration) {
 		let dt = delta.as_secs_f32();
 
-		let (yaw_sin, yaw_cos) = self.builder.yaw.sin_cos();
+		let (yaw_sin, yaw_cos) = self.settings.yaw.sin_cos();
 		let forward = Vec3::new(yaw_cos, 0.0, yaw_sin).normalize();
 		let right = forward.cross(Vec3::Y);
+		self.settings.position += self.dir.z * forward * self.speed * dt;
+		self.settings.position += self.dir.x * right * self.speed * dt;
 
-		self.builder.position += self.dir.z * forward * self.speed * dt;
-		self.builder.position += self.dir.x * right * self.speed * dt;
+		self.settings.position.y += self.dir.y * self.speed * dt;
 
-		self.builder.position.y += self.dir.y * self.speed * dt;
-
-		self.builder.yaw += self.rot.x * self.sensitivity * dt;
-		self.builder.pitch -= self.rot.y * self.sensitivity * dt;
+		self.settings.yaw += self.rot.x * self.sensitivity * dt;
+		self.settings.pitch -= self.rot.y * self.sensitivity * dt;
 
 		self.rot = Vec2::ZERO;
 
-		self.builder.pitch = self.builder.pitch.clamp(-FRAC_PI_2, FRAC_PI_2);
-	}
-
-	pub fn attach_to(&mut self, instance: InstanceRef) {
-		self.instance = Some(instance);
+		self.settings.pitch = self.settings.pitch.clamp(-FRAC_PI_2, FRAC_PI_2);
 	}
 }

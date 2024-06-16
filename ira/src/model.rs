@@ -3,9 +3,16 @@ use std::{mem, ops::Range};
 use bytemuck::{Pod, Zeroable};
 use glam::{Mat4, Quat, Vec3};
 use ira_drum::Handle;
+use rapier3d::{
+	dynamics::{RigidBodyBuilder, RigidBodyHandle},
+	geometry::{ColliderBuilder, ColliderHandle},
+};
 use wgpu::util::DeviceExt;
 
-use crate::{physics::BoundingBox, GpuDrum, GpuMaterial, GpuMesh};
+use crate::{
+	physics::{BoundingBox, PhysicsState},
+	GpuDrum, GpuMaterial, GpuMesh,
+};
 
 pub trait VertexExt {
 	const ATTRIBUTES: [wgpu::VertexAttribute; 4];
@@ -54,6 +61,7 @@ pub struct GpuMeshHandles {
 }
 
 impl GpuMeshHandles {
+	#[must_use]
 	pub fn min_max(&self, drum: &GpuDrum) -> (Vec3, Vec3) {
 		let mut min = Vec3::splat(f32::INFINITY);
 		let mut max = Vec3::splat(f32::NEG_INFINITY);
@@ -97,13 +105,18 @@ pub struct GpuModel {
 }
 
 impl GpuModel {
+	#[must_use]
 	pub fn new(
 		device: &wgpu::Device,
+		physics: &PhysicsState,
 		drum: &GpuDrum,
 		meshes: GpuMeshHandles,
 		instances: Vec<Instance>,
 	) -> Self {
-		let gpu_instances = instances.iter().map(Instance::to_gpu).collect::<Vec<_>>();
+		let gpu_instances = instances
+			.iter()
+			.map(|i| i.to_gpu(physics))
+			.collect::<Vec<_>>();
 		let (min, max) = meshes.min_max(drum);
 
 		Self {
@@ -113,13 +126,8 @@ impl GpuModel {
 			instances: gpu_instances,
 			instance_data: instances,
 
-			bounds: BoundingBox::Cuboid { min, max },
+			bounds: BoundingBox { min, max },
 		}
-	}
-
-	pub fn add_instance(&mut self, instance: Instance) {
-		self.instances.push(instance.to_gpu());
-		self.instance_data.push(instance);
 	}
 
 	pub fn update_instance<F>(&mut self, index: usize, update: F)
@@ -165,43 +173,77 @@ impl GpuModel {
 
 #[must_use]
 #[derive(Debug)]
-pub struct Instance {
-	pub last_position: Vec3,
-
+pub struct InstanceBuilder {
 	pub position: Vec3,
 	pub rotation: Quat,
 	pub scale: Vec3,
 
-	pub velocity: Vec3,
-	pub gravity: bool,
+	pub rigidbody: Option<RigidBodyBuilder>,
+	pub collider: Option<ColliderBuilder>,
 }
 
-impl Default for Instance {
+impl Default for InstanceBuilder {
 	fn default() -> Self {
 		Self {
-			last_position: Vec3::ZERO,
 			position: Vec3::ZERO,
 			rotation: Quat::IDENTITY,
 			scale: Vec3::ONE,
-
-			velocity: Vec3::ZERO,
-			gravity: false,
+			rigidbody: None,
+			collider: None,
 		}
 	}
 }
 
-#[must_use]
-#[repr(C)]
-#[derive(Copy, Clone, Debug, Pod, Zeroable)]
-pub struct GpuInstance {
-	model: [[f32; 4]; 4],
+impl InstanceBuilder {
+	/// Sets the position of the instance.
+	///
+	/// Do not use this to update the position of the instance. Instead, use
+	/// [`update_instance`](GpuModel::update_instance).
+	pub fn position(mut self, position: Vec3) -> Self {
+		self.position = position;
+		self
+	}
+
+	/// Rotates the instance such that `up` rotates the instance to the up vector
+	/// of the engine (which is `Vec3::Y`).
+	///
+	/// This is particularly useful when importing a model with a different up vector.
+	/// The up vector used in Ira is [`Vec3::Y`].
+	pub fn up(mut self, up: Vec3) -> Self {
+		self.rotation = Quat::from_rotation_arc(up, Vec3::Y) * self.rotation;
+		self
+	}
+
+	pub fn rotation(mut self, rotation: Quat) -> Self {
+		self.rotation = rotation * self.rotation;
+		self
+	}
+
+	pub fn scale(mut self, scale: Vec3) -> Self {
+		self.scale = scale;
+		self
+	}
+
+	pub fn rigidbody(mut self, rigidbody: RigidBodyBuilder) -> Self {
+		self.rigidbody = Some(rigidbody);
+		self
+	}
+
+	pub fn collider(mut self, collider: ColliderBuilder) -> Self {
+		self.collider = Some(collider);
+		self
+	}
 }
 
-impl GpuInstance {
-	#[must_use]
-	pub fn model(&self) -> Mat4 {
-		Mat4::from_cols_array_2d(&self.model)
-	}
+#[must_use]
+#[derive(Debug)]
+pub struct Instance {
+	pub position: Vec3,
+	pub rotation: Quat,
+	pub scale: Vec3,
+
+	pub rigidbody: Option<RigidBodyHandle>,
+	pub collider: Option<ColliderHandle>,
 }
 
 impl Instance {
@@ -221,67 +263,60 @@ impl Instance {
 		}
 	}
 
-	/// Sets the position of the instance.
-	///
-	/// Do not use this to update the position of the instance. Instead, use
-	/// [`update_instance`](GpuModel::update_instance).
-	pub fn with_position(mut self, position: Vec3) -> Self {
-		self.last_position = position;
-		self.position = position;
-		self
-	}
+	pub fn to_gpu(&self, physics: &PhysicsState) -> GpuInstance {
+		let (rotation, position) =
+			if let Some(rigidbody) = self.rigidbody.and_then(|h| physics.rigid_bodies.get(h)) {
+				let position = rigidbody.position();
 
-	/// Enables gravity for the instance.
-	pub fn with_gravity(mut self) -> Self {
-		self.gravity = true;
-		self
-	}
+				(position.rotation.into(), position.translation.vector.into())
+			} else {
+				(self.rotation, self.position)
+			};
 
-	/// Sets the velocity of the instance.
-	pub fn with_velocity(mut self, velocity: Vec3) -> Self {
-		self.velocity = velocity;
-		self
-	}
-
-	pub fn with_scale(mut self, scale: Vec3) -> Self {
-		self.scale = scale;
-		self
-	}
-
-	/// Rotates the instance such that `up` rotates the instance to the up vector
-	/// of the engine (which is `Vec3::Y`).
-	///
-	/// This is particularly useful when importing a model with a different up vector.
-	/// The up vector used in Ira is [`Vec3::Y`].
-	pub fn with_up(mut self, up: Vec3) -> Self {
-		self.rotation = Quat::from_rotation_arc(up, Vec3::Y);
-		self
-	}
-
-	pub fn with_rotation(mut self, rotation: Quat) -> Self {
-		self.rotation = rotation * self.rotation;
-		self
+		GpuInstance {
+			model: Mat4::from_scale_rotation_translation(self.scale, rotation, position)
+				.to_cols_array_2d(),
+		}
 	}
 
 	pub fn rotate_y(&mut self, rad: f32) {
 		self.rotation = Quat::from_rotation_y(rad) * self.rotation;
 	}
+}
 
-	pub fn to_gpu(&self) -> GpuInstance {
-		GpuInstance {
-			model: Mat4::from_scale_rotation_translation(self.scale, self.rotation, self.position)
-				.to_cols_array_2d(),
-		}
+#[must_use]
+#[repr(C)]
+#[derive(Copy, Clone, Debug, Pod, Zeroable)]
+pub struct GpuInstance {
+	model: [[f32; 4]; 4],
+}
+
+impl GpuInstance {
+	#[must_use]
+	pub fn model(&self) -> Mat4 {
+		Mat4::from_cols_array_2d(&self.model)
 	}
 }
 
 pub trait ModelExt {
-	fn into_gpu(self, device: &wgpu::Device, drum: &GpuDrum, instances: Vec<Instance>) -> GpuModel;
+	fn into_gpu(
+		self,
+		device: &wgpu::Device,
+		physics: &PhysicsState,
+		drum: &GpuDrum,
+		instances: Vec<Instance>,
+	) -> GpuModel;
 }
 
 impl ModelExt for ira_drum::Model {
-	fn into_gpu(self, device: &wgpu::Device, drum: &GpuDrum, instances: Vec<Instance>) -> GpuModel {
-		GpuModel::new(device, drum, self.meshes.into(), instances)
+	fn into_gpu(
+		self,
+		device: &wgpu::Device,
+		physics: &PhysicsState,
+		drum: &GpuDrum,
+		instances: Vec<Instance>,
+	) -> GpuModel {
+		GpuModel::new(device, physics, drum, self.meshes.into(), instances)
 	}
 }
 

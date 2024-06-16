@@ -258,6 +258,8 @@ impl fmt::Debug for Mesh {
 				&format_args!("Box<[u32; {}]>", self.indices.len()),
 			)
 			.field("material", &self.material)
+			.field("min", &self.min)
+			.field("max", &self.max)
 			.finish()
 	}
 }

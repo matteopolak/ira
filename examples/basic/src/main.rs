@@ -5,26 +5,26 @@ use ira::{
 	glam::{Quat, Vec3},
 	physics::InstanceRef,
 	winit::{error::EventLoopError, window::Window},
-	Game, Instance,
+	Game, InstanceBuilder, RigidBodyBuilder,
 };
 use ira_drum::Drum;
 
 #[derive(Debug)]
 struct Player {
-	instance: InstanceRef,
+	_instance: InstanceRef,
 }
 
 impl Default for Player {
 	fn default() -> Self {
 		Self {
-			instance: InstanceRef::new(2, 0),
-			..Default::default()
+			_instance: InstanceRef::new(2, 0),
 		}
 	}
 }
 
+#[derive(Default)]
 struct App {
-	player: Player,
+	_player: Player,
 }
 
 impl ira::App for App {
@@ -34,32 +34,30 @@ impl ira::App for App {
 
 	fn on_ready(&mut self, state: &mut State) {
 		// car
-		let car = &mut state.drum.models[0];
-
-		car.add_instance(
-			Instance::default()
-				.with_up(Vec3::Z)
-				.with_position(Vec3::new(0.0, 10.0, 0.0))
-				.with_gravity(),
+		state.add_instance(
+			0,
+			InstanceBuilder::default()
+				.up(Vec3::Z)
+				.rotation(Quat::from_rotation_x(PI * 0.25))
+				.position(Vec3::new(0.0, 20.0, 0.0))
+				.scale(Vec3::splat(5.0))
+				.rigidbody(RigidBodyBuilder::dynamic()),
 		);
 
 		// floor
-		let floor = &mut state.drum.models[1];
-
-		floor.add_instance(Instance::default());
-
-		// player model
-		let player = &mut state.drum.models[2];
-
-		player.add_instance(
-			Instance::default()
-				.with_position(Vec3::new(0.0, 10.0, 0.0))
-				.with_up(Vec3::Z)
-				.with_gravity(),
+		state.add_instance(
+			1,
+			InstanceBuilder::default().scale(Vec3::new(100.0, 0.1, 100.0)),
 		);
 
-		// set camera player
-		state.controller.attach_to(InstanceRef::new(2, 0));
+		// player model
+		/*state.add_instance(
+			2,
+			InstanceBuilder::default()
+				.position(Vec3::new(0.0, 10.0, 0.0))
+				.up(Vec3::Z)
+				.rigidbody(RigidBodyBuilder::dynamic()),
+		);*/
 	}
 
 	fn on_frame(&mut self, state: &mut State, delta: Duration) {
@@ -72,5 +70,5 @@ impl ira::App for App {
 }
 
 fn main() -> Result<(), EventLoopError> {
-	Game::new(App).run()
+	Game::new(App::default()).run()
 }

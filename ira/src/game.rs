@@ -1,8 +1,8 @@
 use crate::{
 	camera, light,
 	model::{DrawModel, Instance},
-	physics::Physics,
-	DrumExt, GpuDrum, GpuTexture, MaterialExt, VertexExt,
+	physics::PhysicsState,
+	Camera, DrumExt, GpuDrum, GpuTexture, MaterialExt, VertexExt,
 };
 
 use std::{
@@ -14,7 +14,7 @@ use glam::Vec3;
 use ira_drum::{Drum, Material, Vertex};
 use winit::{
 	application::ApplicationHandler,
-	event::{DeviceEvent, KeyEvent, MouseButton, WindowEvent},
+	event::{DeviceEvent, KeyEvent, WindowEvent},
 	event_loop::{ActiveEventLoop, EventLoop},
 	keyboard::{KeyCode, PhysicalKey},
 	window::{CursorGrabMode, Fullscreen, Window, WindowAttributes, WindowId},
@@ -116,18 +116,22 @@ pub struct State {
 	opaque_render_pipeline: wgpu::RenderPipeline,
 	transparent_render_pipeline: wgpu::RenderPipeline,
 
-	pub controller: camera::CameraController,
+	pub camera: Camera,
 
 	depth_texture: GpuTexture,
 
 	lights: light::Lights,
 
 	last_frame: time::Instant,
+	last_physics: time::Instant,
 	pub sample_count: u32,
 
 	multisampled_texture: GpuTexture,
 
 	pub drum: GpuDrum,
+	pub physics: PhysicsState,
+
+	pub desired_fps: f32,
 }
 
 async fn request_device(adapter: &wgpu::Adapter) -> (wgpu::Device, wgpu::Queue) {
@@ -162,7 +166,7 @@ fn create_pbr_render_pipelines(
 	device: &wgpu::Device,
 	material_bind_group_layout: &wgpu::BindGroupLayout,
 	brdf_bind_group_layout: &wgpu::BindGroupLayout,
-	controller: &camera::CameraController,
+	camera: &Camera,
 	lights: &light::Lights,
 	sample_count: u32,
 ) -> (wgpu::RenderPipeline, wgpu::RenderPipeline) {
@@ -175,7 +179,7 @@ fn create_pbr_render_pipelines(
 		label: None,
 		bind_group_layouts: &[
 			material_bind_group_layout,
-			&controller.camera.bind_group_layout,
+			&camera.gpu.bind_group_layout,
 			&lights.bind_group_layout,
 			brdf_bind_group_layout,
 		],
@@ -272,12 +276,13 @@ impl State {
 		let (brdf_bind_group, brdf_bind_group_layout) =
 			drum.create_brdf_bind_group(&device, &queue);
 
-		let drum = drum.into_gpu(&device, &queue);
+		let physics = PhysicsState::default();
+		let drum = drum.into_gpu(&device, &queue, &physics);
 
 		let material_bind_group_layout = Material::create_bind_group_layout(&device);
-		let camera_builder = camera::CameraBuilder::new(config.width as f32, config.height as f32);
-		let camera = camera::Camera::new(&camera_builder).create_on_device(&device);
-		let controller = camera::CameraController::new(camera, camera_builder);
+		let camera_settings = camera::Settings::new(config.width as f32, config.height as f32);
+		let camera = camera::CameraUniform::from_settings(&camera_settings).into_gpu(&device);
+		let camera = Camera::new(camera, camera_settings);
 
 		let lights = light::Lights::from_lights(
 			&[
@@ -291,7 +296,7 @@ impl State {
 			&device,
 			&material_bind_group_layout,
 			&brdf_bind_group_layout,
-			&controller,
+			&camera,
 			&lights,
 			sample_count,
 		);
@@ -312,16 +317,20 @@ impl State {
 
 			brdf_bind_group,
 
-			controller,
+			camera,
 			depth_texture,
 
 			lights,
 
 			last_frame: time::Instant::now(),
+			last_physics: time::Instant::now(),
 			sample_count,
 
 			multisampled_texture,
 			drum,
+			physics,
+
+			desired_fps: 120.0,
 		}
 	}
 
@@ -329,8 +338,8 @@ impl State {
 		self.config.width = size.width.max(1);
 		self.config.height = size.height.max(1);
 
-		self.controller
-			.builder
+		self.camera
+			.settings
 			.projection
 			.resize(self.config.width as f32, self.config.height as f32);
 		self.depth_texture
@@ -343,8 +352,8 @@ impl State {
 	}
 
 	fn update(&mut self, delta: time::Duration) {
-		self.controller.update(delta);
-		self.controller.update_view_proj(&self.queue, &self.drum);
+		self.camera.update(delta);
+		self.camera.update_view_proj(&self.queue);
 	}
 
 	fn render(&self) -> Result<(), wgpu::SurfaceError> {
@@ -388,7 +397,7 @@ impl State {
 			rpass.draw_model_instanced(
 				&self.drum,
 				model,
-				&self.controller.camera.bind_group,
+				&self.camera.gpu.bind_group,
 				&self.lights.bind_group,
 				&self.brdf_bind_group,
 				false,
@@ -425,7 +434,7 @@ impl State {
 			rpass.draw_model_instanced(
 				&self.drum,
 				model,
-				&self.controller.camera.bind_group,
+				&self.camera.gpu.bind_group,
 				&self.lights.bind_group,
 				&self.brdf_bind_group,
 				true,
@@ -490,8 +499,7 @@ impl<A: App> ApplicationHandler for Game<A> {
 		};
 
 		if let DeviceEvent::MouseMotion { delta } = event {
-			app.controller
-				.process_mouse((delta.0 as f32, delta.1 as f32));
+			app.camera.process_mouse((delta.0 as f32, delta.1 as f32));
 		}
 	}
 
@@ -516,16 +524,26 @@ impl<A: App> ApplicationHandler for Game<A> {
 			WindowEvent::RedrawRequested => {
 				state.window.request_redraw();
 
+				let delta = state.last_physics.elapsed();
+
+				// physics 60fps
+				if delta.as_secs_f32() >= 1.0 / 60.0 {
+					state.last_physics = time::Instant::now();
+					state.physics_update();
+				}
+
 				let delta = state.last_frame.elapsed();
 
-				state.last_frame = time::Instant::now();
+				if delta.as_secs_f32() < 1.0 / state.desired_fps {
+					return;
+				}
 
-				// physics update
-				state.update_physics(delta);
+				state.last_frame = time::Instant::now();
 
 				state.update(delta);
 				self.app.on_frame(state, delta);
 
+				// TODO: only update instances that have changed
 				for model in &mut state.drum.models {
 					model.update_instance_buffer(&state.device, &state.queue);
 				}
@@ -538,9 +556,6 @@ impl<A: App> ApplicationHandler for Game<A> {
 					Err(wgpu::SurfaceError::OutOfMemory) => event_loop.exit(),
 					Err(wgpu::SurfaceError::Timeout) => log::warn!("surface timeout"),
 				}
-
-				// TODO: add ability to change framerate limit
-				std::thread::sleep(Duration::from_millis(10));
 			}
 			WindowEvent::CloseRequested => {
 				event_loop.exit();
@@ -554,7 +569,7 @@ impl<A: App> ApplicationHandler for Game<A> {
 					},
 				..
 			} => {
-				if state.controller.process_keyboard(key, element_state) {
+				if state.camera.process_keyboard(key, element_state) {
 					return;
 				}
 
@@ -575,9 +590,6 @@ impl<A: App> ApplicationHandler for Game<A> {
 						_ => {}
 					}
 				}
-			}
-			WindowEvent::MouseWheel { delta, .. } => {
-				state.controller.process_scroll(&delta);
 			}
 			_ => {}
 		}

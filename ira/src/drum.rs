@@ -1,8 +1,8 @@
 use ira_drum::Handle;
 
 use crate::{
-	GpuMaterial, GpuMesh, GpuModel, GpuTexture, GpuTextureCollection, MaterialExt, MeshExt,
-	ModelExt, TextureExt,
+	physics::PhysicsState, GpuMaterial, GpuMesh, GpuModel, GpuTexture, GpuTextureCollection,
+	MaterialExt, MeshExt, ModelExt, TextureExt,
 };
 
 #[derive(Debug, Default)]
@@ -26,11 +26,21 @@ pub trait DrumExt {
 		queue: &wgpu::Queue,
 	) -> (wgpu::BindGroup, wgpu::BindGroupLayout);
 
-	fn into_gpu(self, device: &wgpu::Device, queue: &wgpu::Queue) -> GpuDrum;
+	fn into_gpu(
+		self,
+		device: &wgpu::Device,
+		queue: &wgpu::Queue,
+		physics: &PhysicsState,
+	) -> GpuDrum;
 }
 
 impl DrumExt for ira_drum::Drum {
-	fn into_gpu(self, device: &wgpu::Device, queue: &wgpu::Queue) -> GpuDrum {
+	fn into_gpu(
+		self,
+		device: &wgpu::Device,
+		queue: &wgpu::Queue,
+		physics: &PhysicsState,
+	) -> GpuDrum {
 		let mut drum = GpuDrum::default();
 
 		drum.textures.bank = self
@@ -46,7 +56,7 @@ impl DrumExt for ira_drum::Drum {
 		drum.meshes = self.meshes.iter().map(|m| m.to_gpu(device)).collect();
 
 		drum.models = IntoIterator::into_iter(self.models)
-			.map(|m| m.into_gpu(device, &drum, Vec::new()))
+			.map(|m| m.into_gpu(device, physics, &drum, Vec::new()))
 			.collect();
 
 		drum

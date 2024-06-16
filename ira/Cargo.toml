@@ -10,11 +10,12 @@ description = "A general-purpose, code-first game engine."
 anyhow = "1"
 bytemuck = { version = "1", features = ["derive"] }
 env_logger = "0.11"
-glam = "0.28"
+glam = "0.27"
 gltf = { version = "1", features = ["import"] }
 image = "0.25"
 ira_drum.path = "../ira_drum"
 log = "0.4"
+nalgebra = { version = "0.32.6", features = ["convert-glam027"] }
 pollster = "0.3"
 rapier3d = "0.20.0"
 wgpu = "0.20"

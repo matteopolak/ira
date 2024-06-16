@@ -27,5 +27,6 @@ pub use texture::*;
 pub use glam;
 pub use ira_drum::*;
 pub use pollster;
+pub use rapier3d::prelude::*;
 pub use wgpu;
 pub use winit;
