@@ -403,11 +403,23 @@ impl Instance {
 		self.body.rotate_y(physics, rad);
 	}
 
-	pub fn move_and_rotate(&self, physics: &mut PhysicsState, position: Vec3, rotation: Quat) {
-		match self.body {
-			Body::Static { .. } => {}
+	/// Moves and rotates the Rigidbody (if it exists).
+	pub fn set_position_rotation(
+		&mut self,
+		physics: &mut PhysicsState,
+		position: Vec3,
+		rotation: Quat,
+	) {
+		match &mut self.body {
+			Body::Static {
+				position: pos,
+				rotation: rot,
+			} => {
+				*pos = position;
+				*rot = rotation;
+			}
 			Body::Rigid(handle) => {
-				let Some(body) = physics.rigid_bodies.get_mut(handle) else {
+				let Some(body) = physics.rigid_bodies.get_mut(*handle) else {
 					return;
 				};
 

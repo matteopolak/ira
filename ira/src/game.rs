@@ -559,19 +559,11 @@ impl<A: App> ApplicationHandler for Game<A> {
 		};
 
 		if let DeviceEvent::MouseMotion { delta } = event {
-			ctx.mouse_delta = (delta.0 as f32, delta.1 as f32).into();
+			ctx.mouse_delta += Vec2::from((delta.0 as f32, delta.1 as f32));
 		}
 	}
 
 	fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
-		let Some((ctx, _)) = self.state.as_mut() else {
-			return;
-		};
-
-		if ctx.last_frame.elapsed().as_secs_f32() < 1.0 / ctx.desired_fps {
-			return;
-		}
-
 		self.render(event_loop);
 	}
 
@@ -609,7 +601,9 @@ impl<A: App> ApplicationHandler for Game<A> {
 				..
 			} => {
 				if state.is_pressed() {
-					ctx.pressed_keys.push(key);
+					if !ctx.pressed_keys.contains(&key) {
+						ctx.pressed_keys.push(key);
+					}
 
 					match key {
 						KeyCode::Escape => {

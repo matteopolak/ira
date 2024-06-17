@@ -16,7 +16,7 @@ gltf = { version = "1", features = ["import"] }
 image = "0.25"
 ira_drum.path = "../ira_drum"
 log = "0.4"
-nalgebra = { version = "0.32.6", features = ["convert-glam027"] }
+nalgebra = { version = "0.32", features = ["convert-glam027"] }
 pollster = "0.3"
 rapier3d = "0.20"
 wgpu = "0.20"

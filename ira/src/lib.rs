@@ -9,6 +9,7 @@
 
 pub mod camera;
 pub mod drum;
+pub mod extra;
 pub mod game;
 pub mod light;
 pub mod material;

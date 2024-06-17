@@ -1,6 +1,11 @@
-use std::{f32::consts::PI, mem, time::Duration};
+use std::{
+	f32::consts::{FRAC_PI_2, PI},
+	mem,
+	time::{Duration, Instant},
+};
 
 use ira::{
+	extra::camera::CameraController,
 	glam::{Quat, Vec3},
 	physics::InstanceHandle,
 	winit::{error::EventLoopError, window::Window},
@@ -11,13 +16,10 @@ use ira_drum::Drum;
 #[derive(Debug)]
 struct Player {
 	instance: InstanceHandle,
-
 	d_position: Vec3,
-	pitch: f32,
-	yaw: f32,
 
+	camera: CameraController,
 	speed: f32,
-	sensitivity: f32,
 }
 
 impl Player {
@@ -25,14 +27,14 @@ impl Player {
 		Self {
 			instance,
 			d_position: Vec3::ZERO,
-			pitch: 0.0,
-			yaw: 0.0,
-			speed: 10.0,
-			sensitivity: 0.01,
+			camera: CameraController::default(),
+			speed: 0.5,
 		}
 	}
 
 	pub fn on_update(&mut self, ctx: &Context, delta: Duration) {
+		self.camera.on_update(ctx, delta);
+
 		let delta = delta.as_secs_f32();
 		let dir = {
 			let mut dir = Vec3::ZERO;
@@ -57,30 +59,7 @@ impl Player {
 		}
 		.normalize_or_zero();
 
-		let (_, rotation) = self.pos_rot(ctx);
-
-		let axis = rotation.to_scaled_axis();
-		let forward = axis.cross(Vec3::Y).normalize();
-		let right = forward.cross(Vec3::Y).normalize();
-
-		self.d_position += forward * dir.z * self.speed * delta;
-		self.d_position += right * dir.x * self.speed * delta;
-		self.d_position.y += dir.y * self.speed * delta;
-
-		let d = ctx.mouse_delta();
-
-		self.pitch += d.y * self.sensitivity;
-		self.yaw += d.x * self.sensitivity;
-
-		// clamp pitch
-		self.pitch = self.pitch.clamp(-PI * 0.5, PI * 0.5);
-	}
-
-	pub fn pos_rot(&self, ctx: &Context) -> (Vec3, Quat) {
-		let (_, instance) = self.instance.resolve(&ctx.drum);
-		let (pos, rot) = instance.pos_rot(&ctx.physics);
-
-		(pos, rot)
+		self.d_position += self.camera.transform_dir(dir) * self.speed * delta;
 	}
 
 	pub fn take_delta_pos(&mut self) -> Vec3 {
@@ -141,31 +120,40 @@ impl ira::App for App {
 
 		// handle player movement
 		let (_, player) = self.player.instance.resolve_mut(&mut ctx.drum);
-		let d_pos = self.player.take_delta_pos();
 
 		if jump {
 			player.body.update(&mut ctx.physics, |body| {
-				body.add_force((Vec3::Y * 1.0).into(), true);
+				body.apply_impulse((Vec3::Y * 0.5).into(), true);
 			});
 		}
 
 		let (pos, _) = player.pos_rot(&ctx.physics);
-		let rot = Quat::from_rotation_y(self.player.yaw);
+		let pos = pos + self.player.take_delta_pos();
 
-		player.move_and_rotate(&mut ctx.physics, pos + d_pos.normalize_or_zero(), rot);
+		player.set_position_rotation(
+			&mut ctx.physics,
+			pos,
+			Quat::from_rotation_z(self.player.camera.yaw),
+		);
 
-		let (position, _) = self.player.pos_rot(ctx);
-		let rot = Quat::from_rotation_x(self.player.pitch) * rot;
-
-		ctx.camera.apply(position, rot);
+		for car in &mut self.cars {
+			car.update(ctx, |i, p| {
+				i.rotate_y(p, 0.01);
+			});
+		}
 	}
 
 	fn on_update(&mut self, ctx: &mut Context, delta: Duration) {
 		self.player.on_update(ctx, delta);
 
-		for car in &mut self.cars {
-			car.update(ctx, |i, p| i.rotate_y(p, delta.as_secs_f32() * PI * 0.25));
-		}
+		let (_, player) = self.player.instance.resolve(&ctx.drum);
+		let (pos, _) = player.pos_rot(&ctx.physics);
+
+		ctx.camera.apply(
+			pos + self.player.d_position,
+			self.player.camera.yaw,
+			self.player.camera.pitch,
+		);
 	}
 }
 

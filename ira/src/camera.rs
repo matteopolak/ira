@@ -25,7 +25,8 @@ impl Projection {
 
 pub struct Settings {
 	pub position: Vec3,
-	pub rotation: Quat,
+	pub yaw: f32,
+	pub pitch: f32,
 
 	pub projection: Projection,
 }
@@ -35,7 +36,8 @@ impl Settings {
 	pub fn new(width: f32, height: f32) -> Self {
 		Self {
 			position: Vec3::new(-2.0, 0.0, 0.0),
-			rotation: Quat::from_rotation_y(-FRAC_PI_2),
+			yaw: 0.0,
+			pitch: 0.0,
 			projection: Projection {
 				aspect: width / height,
 				fovy: 40f32.to_radians(),
@@ -47,14 +49,15 @@ impl Settings {
 
 	#[must_use]
 	pub fn to_view_projection_matrix(&self) -> Mat4 {
-		let view = Mat4::look_at_rh(
-			self.position,
-			self.position + self.rotation * Vec3::Z,
-			Vec3::Y,
-		);
-		let proj = self.projection.to_perspective_matrix();
+		let (sin_pitch, cos_pitch) = self.pitch.sin_cos();
+		let (sin_yaw, cos_yaw) = self.yaw.sin_cos();
 
-		proj * view
+		self.projection.to_perspective_matrix()
+			* Mat4::look_to_rh(
+				self.position,
+				Vec3::new(cos_pitch * cos_yaw, sin_pitch, cos_pitch * sin_yaw).normalize(),
+				Vec3::Y,
+			)
 	}
 }
 
@@ -174,8 +177,9 @@ impl Camera {
 		);
 	}
 
-	pub fn apply(&mut self, position: Vec3, rotation: Quat) {
+	pub fn apply(&mut self, position: Vec3, yaw: f32, pitch: f32) {
 		self.settings.position = position;
-		self.settings.rotation = rotation;
+		self.settings.yaw = yaw;
+		self.settings.pitch = pitch;
 	}
 }
