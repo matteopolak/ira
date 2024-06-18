@@ -4,6 +4,11 @@ use glam::Vec3;
 
 use crate::Context;
 
+/// A basic camera controller.
+///
+/// Provides a way to control the camera's rotation (pitch and yaw) using the mouse.
+/// This does NOT handle movement, but it can be applied to the context's camera
+/// with [`crate::Camera::apply`].
 #[must_use]
 #[derive(Debug)]
 pub struct CameraController {

@@ -23,7 +23,6 @@ pub trait App {
 	/// Called once at the start of the program, right after the window
 	/// is created but before anything else is done.
 	fn on_init(window: &mut Window) -> Drum;
-
 	/// Called once when everything has been created on the GPU.
 	fn on_ready(ctx: &mut Context) -> Self;
 	/// Called once per frame, right before rendering.

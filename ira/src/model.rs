@@ -249,11 +249,19 @@ impl InstanceBuilder {
 		self
 	}
 
+	/// Rotates the instance by the given quaternion.
+	///
+	/// Once built, this rotation will be applied to the instance's rigidbody,
+	/// or collider if the rigidbody doesn't exist.
 	pub fn rotation(mut self, rotation: Quat) -> Self {
 		self.rotation = rotation * self.rotation;
 		self
 	}
 
+	/// Sets the scale of the instance. By default, this is [`Vec3::ONE`].
+	///
+	/// This scale is applied to the rendered model and the default collider.
+	/// If you create your own collider, this scale will not be applied to it.
 	pub fn scale(mut self, scale: Vec3) -> Self {
 		self.scale = scale;
 		self
@@ -282,6 +290,13 @@ impl InstanceBuilder {
 	}
 }
 
+/// The body of an instance.
+///
+/// When using [`Body::Static`], the instance is not affected by any physics.
+/// If you want a static instance to be affected by physics, use a kinematic rigidbody.
+///
+/// When using [`Body::Rigid`], the instance is affected according to the rules of
+/// the rigidbody. See [`RigidBodyBuilder`] for more information.
 #[derive(Debug)]
 pub enum Body {
 	Static { position: Vec3, rotation: Quat },
@@ -383,7 +398,7 @@ impl From<(RigidBodyHandle, ColliderHandle)> for Instance {
 }
 
 impl Instance {
-	const VERTICES: [wgpu::VertexAttribute; 4] = wgpu::vertex_attr_array![
+	pub(crate) const VERTICES: [wgpu::VertexAttribute; 4] = wgpu::vertex_attr_array![
 		4 => Float32x4,
 		5 => Float32x4,
 		6 => Float32x4,
@@ -391,7 +406,7 @@ impl Instance {
 	];
 
 	#[must_use]
-	pub fn desc() -> wgpu::VertexBufferLayout<'static> {
+	pub(crate) fn desc() -> wgpu::VertexBufferLayout<'static> {
 		wgpu::VertexBufferLayout {
 			array_stride: mem::size_of::<GpuInstance>() as wgpu::BufferAddress,
 			step_mode: wgpu::VertexStepMode::Instance,
@@ -399,11 +414,7 @@ impl Instance {
 		}
 	}
 
-	pub fn builder() -> InstanceBuilder {
-		InstanceBuilder::default()
-	}
-
-	pub fn to_gpu(&self, physics: &PhysicsState) -> GpuInstance {
+	pub(crate) fn to_gpu(&self, physics: &PhysicsState) -> GpuInstance {
 		let (position, rotation) = match self.body {
 			Body::Rigid(handle) => {
 				let position = physics
@@ -421,12 +432,50 @@ impl Instance {
 				.to_cols_array_2d(),
 		}
 	}
+}
 
+impl Instance {
+	/// Creates a new instance builder.
+	///
+	/// # Examples
+	///
+	/// ```rust
+	/// let instance = Instance::builder()
+	///   .position(Vec3::new(0.0, 10.0, 0.0))
+	///   .scale(Vec3::splat(1.0))
+	///   .rigidbody(RigidBodyBuilder::dynamic())
+	///   .collider(ColliderBuilder::cuboid(1.0, 1.0, 1.0));
+	///   .build();
+	/// ```
+	pub fn builder() -> InstanceBuilder {
+		InstanceBuilder::default()
+	}
+
+	/// Returns the scale of the instance. By default, this is [`Vec3::ONE`].
+	#[must_use]
+	pub fn scale(&self) -> Vec3 {
+		self.scale
+	}
+
+	/// Returns the body of the instance.
+	#[must_use]
+	pub fn body(&self) -> &Body {
+		&self.body
+	}
+
+	/// Returns a handle to the collider attached to the rigidbody, if it exists.
+	#[must_use]
+	pub fn collider_handle(&self) -> Option<ColliderHandle> {
+		self.collider
+	}
+
+	/// Rotates the instance around the Y axis. Note that this is equivalent to
+	/// teleporting the instance to a new rotation.
 	pub fn rotate_y(&mut self, physics: &mut PhysicsState, rad: f32) {
 		self.body.rotate_y(physics, rad);
 	}
 
-	/// Moves and rotates the Rigidbody (if it exists).
+	/// Moves and rotates the rigidbody (if it exists).
 	pub fn set_position_rotation(
 		&mut self,
 		physics: &mut PhysicsState,

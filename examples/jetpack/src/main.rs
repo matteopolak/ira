@@ -11,7 +11,7 @@ use ira_drum::Drum;
 
 #[derive(Debug)]
 struct Player {
-	instance: InstanceHandle,
+	instance: Instance,
 	d_position: Vec3,
 
 	camera: CameraController,
@@ -19,12 +19,12 @@ struct Player {
 }
 
 impl Player {
-	pub fn new(instance: InstanceHandle) -> Self {
+	pub fn new(instance: Instance) -> Self {
 		Self {
 			instance,
 			d_position: Vec3::ZERO,
 			camera: CameraController::default(),
-			speed: 1.0,
+			speed: 5.0,
 		}
 	}
 
@@ -83,7 +83,7 @@ impl ira::App for App {
 						.up(Vec3::Z)
 						.rotation(Quat::from_rotation_x(FRAC_PI_4))
 						.position(Vec3::new(0.0, 10.0 + i as f32 * 5.0, 0.0))
-						.scale(Vec3::splat(1.0))
+						.scale(Vec3::splat(5.0))
 						.rigidbody(RigidBodyBuilder::dynamic()),
 				)
 			})
@@ -96,26 +96,26 @@ impl ira::App for App {
 				.scale(Vec3::new(100.0, 1.0, 100.0)),
 		);
 
-		let player = ctx.add_instance(
-			ctx.drum.model_id("orb").unwrap(),
-			Instance::builder()
-				.position(Vec3::new(0.0, 5.0, 0.0))
-				.up(Vec3::Z)
-				.scale(Vec3::splat(0.01))
-				.rigidbody(RigidBodyBuilder::dynamic().lock_rotations()),
+		let body_collider = ctx.add_rigidbody(
+			RigidBodyBuilder::dynamic().lock_rotations(),
+			ctx.drum
+				.model_by_name("orb")
+				.unwrap()
+				.bounds()
+				.to_cuboid(Vec3::splat(0.05))
+				.mass(0.5),
 		);
 
 		Self {
-			player: Player::new(player),
+			player: Player::new(Instance::from(body_collider)),
 			cars,
 		}
 	}
 
 	fn on_fixed_update(&mut self, ctx: &mut Context) {
 		let jump = ctx.pressed(KeyCode::Space);
-
-		// handle player movement
-		let (_, player) = self.player.instance.resolve_mut(&mut ctx.drum);
+		let delta_pos = self.player.take_delta_pos();
+		let player = &mut self.player.instance;
 
 		if jump {
 			player.body.update(&mut ctx.physics, |body| {
@@ -124,7 +124,7 @@ impl ira::App for App {
 		}
 
 		let (pos, _) = player.body.pos_rot(&ctx.physics);
-		let pos = pos + self.player.take_delta_pos();
+		let pos = pos + delta_pos;
 
 		player.set_position_rotation(
 			&mut ctx.physics,
@@ -142,7 +142,7 @@ impl ira::App for App {
 	fn on_update(&mut self, ctx: &mut Context, delta: Duration) {
 		self.player.on_update(ctx, delta);
 
-		let (_, player) = self.player.instance.resolve(&ctx.drum);
+		let player = &self.player.instance;
 		let (pos, _) = player.body.pos_rot(&ctx.physics);
 
 		ctx.camera.apply(

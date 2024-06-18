@@ -2,11 +2,9 @@ use glam::Vec3;
 use rapier3d::{
 	dynamics::{
 		CCDSolver, ImpulseJointSet, IntegrationParameters, IslandManager, MultibodyJointSet,
-		RigidBody, RigidBodyBuilder, RigidBodyHandle, RigidBodySet,
+		RigidBodyBuilder, RigidBodyHandle, RigidBodySet,
 	},
-	geometry::{
-		Collider, ColliderBuilder, ColliderHandle, ColliderSet, DefaultBroadPhase, NarrowPhase,
-	},
+	geometry::{ColliderBuilder, ColliderHandle, ColliderSet, DefaultBroadPhase, NarrowPhase},
 	pipeline::PhysicsPipeline,
 };
 
@@ -140,6 +138,7 @@ impl Context {
 	}
 
 	/// Adds a new rigidbody and collider to the physics world.
+	#[allow(clippy::needless_pass_by_value)]
 	pub fn add_rigidbody(
 		&mut self,
 		rigidbody: RigidBodyBuilder,
@@ -162,6 +161,7 @@ impl Context {
 	/// Adds a new collider to the physics world.
 	///
 	/// To add a collider with a rigidbody, use [`Context::add_rigidbody`] instead.
+	#[allow(clippy::needless_pass_by_value)]
 	pub fn add_collider(&mut self, collider: ColliderBuilder) -> ColliderHandle {
 		self.physics.colliders.insert(collider.build())
 	}
@@ -244,6 +244,7 @@ impl InstanceHandle {
 		)
 	}
 
+	/// Returns the instance associated with the handle.
 	pub fn resolve_mut<'d>(
 		&self,
 		drum: &'d mut GpuDrum,
@@ -256,15 +257,28 @@ impl InstanceHandle {
 		)
 	}
 
+	/// Returns the model associated with the instance.
 	#[must_use]
 	pub fn resolve_model<'d>(&self, drum: &'d GpuDrum) -> &'d GpuModel {
 		&drum.models[self.model]
 	}
 
+	/// Returns the model associated with the instance.
 	pub fn resolve_model_mut<'d>(&self, drum: &'d mut GpuDrum) -> &'d mut GpuModel {
 		&mut drum.models[self.model]
 	}
 
+	/// Updates the instance with the provided closure.
+	///
+	/// # Examples
+	///
+	/// ```rust
+	/// let instance: InstanceHandle = ...;
+	///
+	/// instance.update(ctx, |instance, physics| {
+	///   instance.rotate_y(physics, 0.1);
+	/// });
+	/// ```
 	pub fn update<F>(&self, ctx: &mut Context, update: F)
 	where
 		F: FnOnce(&mut Instance, &mut PhysicsState),
