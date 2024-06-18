@@ -22,3 +22,7 @@ rapier3d = "0.20"
 wgpu = "0.20"
 winit = "0.30"
 
+[features]
+default = ["render"]
+render = []
+

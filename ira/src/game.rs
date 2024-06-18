@@ -22,10 +22,11 @@ use winit::{
 pub trait App {
 	/// Called once at the start of the program, right after the window
 	/// is created but before anything else is done.
-	fn on_init(window: &mut Window) -> Drum;
+	fn on_init() -> Drum;
 	/// Called once when everything has been created on the GPU.
 	fn on_ready(ctx: &mut Context) -> Self;
-	/// Called once per frame, right before rendering.
+	/// Called once per frame, right before rendering. Note that this
+	/// will not be called if the `render` feature is not enabled.
 	fn on_update(&mut self, ctx: &mut Context, delta: Duration) {}
 	/// Called every 1/60th of a second. If queued at the same time as an update,
 	/// this will always be called first.
@@ -502,45 +503,48 @@ impl<A: App> Game<A> {
 			app.on_fixed_update(ctx);
 		}
 
-		let delta = ctx.last_frame.elapsed();
+		#[cfg(feature = "render")]
+		{
+			let delta = ctx.last_frame.elapsed();
 
-		if delta.as_secs_f32() < 1.0 / ctx.desired_fps {
-			return;
-		}
-
-		ctx.last_frame = time::Instant::now();
-
-		app.on_update(ctx, delta);
-		ctx.camera.update_view_proj(&ctx.queue);
-
-		ctx.just_pressed.clear();
-		ctx.mouse_delta = Vec2::ZERO;
-
-		for model in &mut ctx.drum.models {
-			model.update_instance_buffer(&ctx.device, &ctx.queue);
-		}
-
-		match ctx.render() {
-			Ok(..) => {}
-			Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
-				ctx.resize(ctx.window.inner_size());
+			if delta.as_secs_f32() < 1.0 / ctx.desired_fps {
+				return;
 			}
-			Err(wgpu::SurfaceError::OutOfMemory) => event_loop.exit(),
-			Err(wgpu::SurfaceError::Timeout) => log::warn!("surface timeout"),
+
+			ctx.last_frame = time::Instant::now();
+
+			app.on_update(ctx, delta);
+			ctx.camera.update_view_proj(&ctx.queue);
+
+			ctx.just_pressed.clear();
+			ctx.mouse_delta = Vec2::ZERO;
+
+			for model in &mut ctx.drum.models {
+				model.update_instance_buffer(&ctx.device, &ctx.queue);
+			}
+
+			match ctx.render() {
+				Ok(..) => {}
+				Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
+					ctx.resize(ctx.window.inner_size());
+				}
+				Err(wgpu::SurfaceError::OutOfMemory) => event_loop.exit(),
+				Err(wgpu::SurfaceError::Timeout) => log::warn!("surface timeout"),
+			}
 		}
 	}
 }
 
 impl<A: App> ApplicationHandler for Game<A> {
 	fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-		let mut window = event_loop
+		let window = event_loop
 			.create_window(WindowAttributes::default().with_title("Triangle"))
 			.unwrap();
 
 		window.set_cursor_grab(CursorGrabMode::Locked).unwrap();
 		window.set_cursor_visible(false);
 
-		let drum = A::on_init(&mut window);
+		let drum = A::on_init();
 		let mut ctx = pollster::block_on(Context::new(window, drum));
 		let app = A::on_ready(&mut ctx);
 

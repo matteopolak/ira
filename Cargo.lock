@@ -244,6 +244,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9e1b586273c5702936fe7b7d6896644d8be71e6314cfe09d3167c95f712589e8"
 
 [[package]]
+name = "basic"
+version = "0.0.0"
+dependencies = [
+ "ira",
+ "ira_drum",
+]
+
+[[package]]
 name = "bcdec_rs"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1251,6 +1259,7 @@ checksum = "49f1f14873335454500d59611f1cf4a4b0f786f9ac11f4312a78e4cf2566695b"
 name = "jetpack"
 version = "0.0.0"
 dependencies = [
+ "basic",
  "ira",
  "ira_drum",
 ]

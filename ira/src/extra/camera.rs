@@ -50,11 +50,10 @@ impl CameraController {
 	/// This should be called every frame.
 	pub fn on_update(&mut self, ctx: &Context, delta: Duration) {
 		let delta = delta.as_secs_f32();
+		let md = ctx.mouse_delta();
 
-		let d = ctx.mouse_delta();
-
-		self.yaw += d.x * self.sensitivity * delta;
-		self.pitch -= d.y * self.sensitivity * delta;
+		self.yaw += md.x * self.sensitivity * delta;
+		self.pitch -= md.y * self.sensitivity * delta;
 		self.pitch = self.pitch.clamp(-FRAC_PI_2 + 0.01, FRAC_PI_2 - 0.01);
 	}
 
