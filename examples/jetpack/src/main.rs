@@ -5,13 +5,13 @@ use ira::{
 	glam::{Quat, Vec3},
 	physics::InstanceHandle,
 	winit::{error::EventLoopError, window::Window},
-	Context, Game, Instance, KeyCode, RigidBodyBuilder, RigidBodyHandle,
+	Context, Game, Instance, KeyCode, RigidBodyBuilder,
 };
 use ira_drum::Drum;
 
 #[derive(Debug)]
 struct Player {
-	instance: Instance,
+	instance: InstanceHandle,
 	d_position: Vec3,
 
 	camera: CameraController,
@@ -19,7 +19,7 @@ struct Player {
 }
 
 impl Player {
-	pub fn new(instance: Instance) -> Self {
+	pub fn new(instance: InstanceHandle) -> Self {
 		Self {
 			instance,
 			d_position: Vec3::ZERO,
@@ -96,27 +96,26 @@ impl ira::App for App {
 				.scale(Vec3::new(100.0, 1.0, 100.0)),
 		);
 
-		let body_collider = ctx.add_rigidbody(
-			RigidBodyBuilder::dynamic().lock_rotations(),
-			ctx.drum
-				.model_by_name("orb")
-				.unwrap()
-				.bounds()
-				.to_cuboid(Vec3::splat(0.01))
-				.mass(1.0)
-				.position(Vec3::new(0.0, 5.0, 0.0).into()),
+		let player = ctx.add_instance(
+			ctx.drum.model_id("orb").unwrap(),
+			Instance::builder()
+				.position(Vec3::new(0.0, 5.0, 0.0))
+				.up(Vec3::Z)
+				.scale(Vec3::splat(0.01))
+				.rigidbody(RigidBodyBuilder::dynamic().lock_rotations()),
 		);
 
 		Self {
-			player: Player::new(Instance::from(body_collider)),
+			player: Player::new(player),
 			cars,
 		}
 	}
 
 	fn on_fixed_update(&mut self, ctx: &mut Context) {
 		let jump = ctx.pressed(KeyCode::Space);
-		let delta_pos = self.player.take_delta_pos();
-		let player = &mut self.player.instance;
+
+		// handle player movement
+		let (_, player) = self.player.instance.resolve_mut(&mut ctx.drum);
 
 		if jump {
 			player.body.update(&mut ctx.physics, |body| {
@@ -125,7 +124,7 @@ impl ira::App for App {
 		}
 
 		let (pos, _) = player.body.pos_rot(&ctx.physics);
-		let pos = pos + delta_pos;
+		let pos = pos + self.player.take_delta_pos();
 
 		player.set_position_rotation(
 			&mut ctx.physics,
@@ -143,7 +142,7 @@ impl ira::App for App {
 	fn on_update(&mut self, ctx: &mut Context, delta: Duration) {
 		self.player.on_update(ctx, delta);
 
-		let player = &self.player.instance;
+		let (_, player) = self.player.instance.resolve(&ctx.drum);
 		let (pos, _) = player.body.pos_rot(&ctx.physics);
 
 		ctx.camera.apply(

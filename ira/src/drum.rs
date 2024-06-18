@@ -14,13 +14,21 @@ pub struct GpuDrum {
 }
 
 impl GpuDrum {
+	/// Adds a texture to the drum, returning a handle to it.
 	pub fn add_texture(&mut self, texture: GpuTexture) -> Handle<GpuTexture> {
 		self.textures.add_texture(texture)
 	}
 
+	/// Finds a model by name, returning its index.
 	#[must_use]
 	pub fn model_id(&self, name: &str) -> Option<usize> {
 		self.models.iter().position(|m| &*m.name == name)
+	}
+
+	/// Finds a model by name, returning a reference to it.
+	#[must_use]
+	pub fn model_by_name(&self, name: &str) -> Option<&GpuModel> {
+		self.models.iter().find(|m| &*m.name == name)
 	}
 }
 

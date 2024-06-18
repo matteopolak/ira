@@ -2,9 +2,11 @@ use glam::Vec3;
 use rapier3d::{
 	dynamics::{
 		CCDSolver, ImpulseJointSet, IntegrationParameters, IslandManager, MultibodyJointSet,
-		RigidBodySet,
+		RigidBody, RigidBodyBuilder, RigidBodyHandle, RigidBodySet,
 	},
-	geometry::{ColliderBuilder, ColliderSet, DefaultBroadPhase, NarrowPhase},
+	geometry::{
+		Collider, ColliderBuilder, ColliderHandle, ColliderSet, DefaultBroadPhase, NarrowPhase,
+	},
 	pipeline::PhysicsPipeline,
 };
 
@@ -99,7 +101,7 @@ impl PhysicsState {
 
 			if let Some(collider) = instance.collider {
 				new_instance.collider = Some(self.colliders.insert_with_parent(
-					collider.mass(1.0),
+					collider,
 					body,
 					&mut self.rigid_bodies,
 				));
@@ -123,6 +125,10 @@ impl Context {
 				continue;
 			};
 
+			if body.user_data == u128::MAX {
+				continue;
+			}
+
 			let instance: InstanceHandle = body.user_data.into();
 
 			instance.resolve_model_mut(&mut self.drum).dirty = true;
@@ -133,6 +139,37 @@ impl Context {
 		}
 	}
 
+	/// Adds a new rigidbody and collider to the physics world.
+	pub fn add_rigidbody(
+		&mut self,
+		rigidbody: RigidBodyBuilder,
+		collider: ColliderBuilder,
+	) -> (RigidBodyHandle, ColliderHandle) {
+		let body = self
+			.physics
+			.rigid_bodies
+			.insert(rigidbody.user_data(u128::MAX).build());
+
+		let collider = self.physics.colliders.insert_with_parent(
+			collider.build(),
+			body,
+			&mut self.physics.rigid_bodies,
+		);
+
+		(body, collider)
+	}
+
+	/// Adds a new collider to the physics world.
+	///
+	/// To add a collider with a rigidbody, use [`Context::add_rigidbody`] instead.
+	pub fn add_collider(&mut self, collider: ColliderBuilder) -> ColliderHandle {
+		self.physics.colliders.insert(collider.build())
+	}
+
+	/// Adds a new instance to the drum and physics world.
+	///
+	/// If you only want to insert a rigidbody with no model,
+	/// use [`Context::add_rigidbody`] or [`Context::add_collider`] instead.
 	pub fn add_instance(
 		&mut self,
 		model_id: usize,
@@ -146,7 +183,7 @@ impl Context {
 		match (instance.rigidbody, instance.collider) {
 			(Some(body), collider) => {
 				if collider.is_none() {
-					instance.collider = Some(model.bounds.to_cuboid(instance.scale));
+					instance.collider = Some(model.bounds.to_cuboid(instance.scale).mass(1.0));
 				} else {
 					instance.collider = collider;
 				}

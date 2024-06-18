@@ -1,9 +1,6 @@
-use std::{f32::consts::FRAC_PI_2, time::Duration};
-
 use bytemuck::{Pod, Zeroable};
-use glam::{Mat4, Quat, Vec2, Vec3};
+use glam::{Mat4, Vec3};
 use wgpu::util::DeviceExt;
-use winit::{event::ElementState, keyboard::KeyCode};
 
 pub struct Projection {
 	pub aspect: f32,
@@ -40,7 +37,7 @@ impl Settings {
 			pitch: 0.0,
 			projection: Projection {
 				aspect: width / height,
-				fovy: 40f32.to_radians(),
+				fovy: 80f32.to_radians(),
 				znear: 0.1,
 				zfar: 1000.0,
 			},

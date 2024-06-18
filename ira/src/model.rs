@@ -1,4 +1,4 @@
-use std::{mem, ops::Range};
+use std::mem;
 
 use bytemuck::{Pod, Zeroable};
 use glam::{Mat4, Quat, Vec3};
@@ -11,7 +11,7 @@ use wgpu::util::DeviceExt;
 
 use crate::{
 	physics::{BoundingBox, PhysicsState},
-	Context, GpuDrum, GpuMaterial, GpuMesh,
+	GpuDrum, GpuMesh,
 };
 
 pub trait VertexExt {
@@ -137,6 +137,10 @@ impl GpuModel {
 		}
 	}
 
+	pub fn bounds(&self) -> BoundingBox {
+		self.bounds
+	}
+
 	#[must_use]
 	pub fn create_instance_buffer(
 		device: &wgpu::Device,
@@ -255,11 +259,23 @@ impl InstanceBuilder {
 		self
 	}
 
+	/// Sets the rigidbody of the instance.
+	///
+	/// Note that you should provide a collider to the rigidbody if you want
+	/// to set the mass or use a non-cuboid collider. See [`Self::collider`] and
+	/// [`ColliderBuilder::mass`].
 	pub fn rigidbody(mut self, rigidbody: RigidBodyBuilder) -> Self {
 		self.rigidbody = Some(rigidbody);
 		self
 	}
 
+	/// Sets the collider of the instance.
+	///
+	/// Note that you should provide mass to the collider if you want the instance to be
+	/// affected by physics. See [`ColliderBuilder::mass`].
+	///
+	/// By default, a collider is created from the model's bounds with a mass of `1.0`
+	/// if a rigidbody is provided but no collider is provided.
 	pub fn collider(mut self, collider: ColliderBuilder) -> Self {
 		self.collider = Some(collider);
 		self
@@ -331,6 +347,7 @@ impl Body {
 		}
 	}
 
+	#[must_use]
 	pub fn pos_rot(&self, physics: &PhysicsState) -> (Vec3, Quat) {
 		match self {
 			Self::Static { position, rotation } => (*position, *rotation),
@@ -355,6 +372,16 @@ pub struct Instance {
 	pub collider: Option<ColliderHandle>,
 }
 
+impl From<(RigidBodyHandle, ColliderHandle)> for Instance {
+	fn from(value: (RigidBodyHandle, ColliderHandle)) -> Self {
+		Self {
+			scale: Vec3::ONE,
+			body: Body::Rigid(value.0),
+			collider: Some(value.1),
+		}
+	}
+}
+
 impl Instance {
 	const VERTICES: [wgpu::VertexAttribute; 4] = wgpu::vertex_attr_array![
 		4 => Float32x4,
@@ -374,10 +401,6 @@ impl Instance {
 
 	pub fn builder() -> InstanceBuilder {
 		InstanceBuilder::default()
-	}
-
-	pub fn pos_rot(&self, physics: &PhysicsState) -> (Vec3, Quat) {
-		self.body.pos_rot(physics)
 	}
 
 	pub fn to_gpu(&self, physics: &PhysicsState) -> GpuInstance {
@@ -448,6 +471,7 @@ impl GpuInstance {
 }
 
 pub trait ModelExt {
+	/// Converts the model into a GPU model.
 	fn into_gpu(
 		self,
 		device: &wgpu::Device,
