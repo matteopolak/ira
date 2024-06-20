@@ -1,8 +1,9 @@
 use ira_drum::Handle;
+use rapier3d::data::Arena;
 
 use crate::{
 	physics::PhysicsState, GpuMaterial, GpuMesh, GpuModel, GpuTexture, GpuTextureCollection,
-	MaterialExt, MeshExt, ModelExt, TextureExt,
+	Instance, MaterialExt, MeshExt, ModelExt, TextureExt,
 };
 
 #[derive(Debug, Default)]
@@ -11,6 +12,8 @@ pub struct GpuDrum {
 	pub materials: Vec<GpuMaterial>,
 	pub meshes: Vec<GpuMesh>,
 	pub models: Vec<GpuModel>,
+
+	pub instances: Arena<Instance>,
 }
 
 impl GpuDrum {
@@ -21,8 +24,11 @@ impl GpuDrum {
 
 	/// Finds a model by name, returning its index.
 	#[must_use]
-	pub fn model_id(&self, name: &str) -> Option<usize> {
-		self.models.iter().position(|m| &*m.name == name)
+	pub fn model_id(&self, name: &str) -> Option<u32> {
+		self.models
+			.iter()
+			.position(|m| &*m.name == name)
+			.map(|i| i as u32)
 	}
 
 	/// Finds a model by name, returning a reference to it.

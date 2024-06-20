@@ -1,6 +1,8 @@
 use crate::{
-	camera, light, model::Instance, physics::PhysicsState, Camera, DrumExt, GpuDrum, GpuTexture,
-	MaterialExt, VertexExt,
+	camera, light,
+	model::Instance,
+	physics::{InstanceHandle, PhysicsState},
+	Camera, DrumExt, GpuDrum, GpuTexture, InstanceBuilder, MaterialExt, VertexExt,
 };
 
 use std::{
@@ -18,6 +20,10 @@ use winit::{
 	window::{CursorGrabMode, Fullscreen, Window, WindowAttributes, WindowId},
 };
 
+/// Implemented by the application to handle user input,
+/// physics, and rendering.
+///
+/// For networked games, implement the [`Network`] trait as well.
 #[allow(unused_variables)]
 pub trait App {
 	/// Called once at the start of the program, right after the window
@@ -31,6 +37,27 @@ pub trait App {
 	/// Called every 1/60th of a second. If queued at the same time as an update,
 	/// this will always be called first.
 	fn on_fixed_update(&mut self, ctx: &mut Context) {}
+}
+
+pub trait Network {
+	fn on_instance_create(&mut self, ctx: &mut Context, instance: InstanceBuilder);
+	fn on_instance_remove(&mut self, ctx: &mut Context, instance: InstanceHandle);
+	/// Called when an instance is updated.
+	///
+	/// For the server, this should send the rigidbody's position
+	/// to each connected client.
+	///
+	/// For clients, this is called when a rigidbody's position is
+	/// received from the server.
+	///
+	/// In order to guarantee that instance handles are synchronized,
+	/// clients created new instances must wait until the server
+	/// sends the instance handle back to them.
+	fn on_instance_update(&mut self, ctx: &mut Context, instance: InstanceHandle);
+	/// Called when a client connects to the server.
+	fn on_client_connect(&mut self, ctx: &mut Context, client_id: u32) {}
+	/// Called when a client disconnects from the server.
+	fn on_client_disconnect(&mut self, ctx: &mut Context, client_id: u32) {}
 }
 
 pub struct Game<A> {

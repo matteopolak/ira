@@ -4,6 +4,7 @@ use bytemuck::{Pod, Zeroable};
 use glam::{Mat4, Quat, Vec3};
 use ira_drum::Handle;
 use rapier3d::{
+	data::Index,
 	dynamics::{RigidBody, RigidBodyBuilder, RigidBodyHandle},
 	geometry::{ColliderBuilder, ColliderHandle},
 };
@@ -99,8 +100,6 @@ pub struct GpuModel {
 
 	// INVARIANT: `instances` and `instance_data` are the same length.
 	pub(crate) instances: Vec<GpuInstance>,
-	pub(crate) instance_data: Vec<Instance>,
-
 	pub(crate) bounds: BoundingBox,
 
 	last_instance_count: usize,
@@ -114,12 +113,12 @@ impl GpuModel {
 		physics: &PhysicsState,
 		drum: &GpuDrum,
 		meshes: GpuMeshHandles,
-		instances: Vec<Instance>,
+		instances: &[Index],
 		name: Box<str>,
 	) -> Self {
 		let gpu_instances = instances
 			.iter()
-			.map(|i| i.to_gpu(physics))
+			.map(|i| drum.instances.get(*i).unwrap().to_gpu(physics))
 			.collect::<Vec<_>>();
 		let (min, max) = meshes.min_max(drum);
 
@@ -130,7 +129,6 @@ impl GpuModel {
 			instance_buffer: Self::create_instance_buffer(device, &gpu_instances),
 			last_instance_count: instances.len(),
 			instances: gpu_instances,
-			instance_data: instances,
 
 			bounds: BoundingBox { min, max },
 			dirty: false,
@@ -385,6 +383,11 @@ pub struct Instance {
 
 	pub body: Body,
 	pub collider: Option<ColliderHandle>,
+
+	// used to index into the Vec<GpuInstance> in GpuModel
+	pub(crate) instance_id: u32,
+	// used to index into the Vec<GpuModel> in GpuDrum
+	pub(crate) model_id: u32,
 }
 
 impl From<(RigidBodyHandle, ColliderHandle)> for Instance {
@@ -393,6 +396,8 @@ impl From<(RigidBodyHandle, ColliderHandle)> for Instance {
 			scale: Vec3::ONE,
 			body: Body::Rigid(value.0),
 			collider: Some(value.1),
+			instance_id: 0,
+			model_id: 0,
 		}
 	}
 }
@@ -404,6 +409,19 @@ impl Instance {
 		6 => Float32x4,
 		7 => Float32x4,
 	];
+
+	pub(crate) fn new(model_id: u32, instance_id: u32) -> Self {
+		Self {
+			scale: Vec3::ONE,
+			body: Body::Static {
+				position: Vec3::ZERO,
+				rotation: Quat::IDENTITY,
+			},
+			collider: None,
+			instance_id,
+			model_id,
+		}
+	}
 
 	#[must_use]
 	pub(crate) fn desc() -> wgpu::VertexBufferLayout<'static> {
@@ -526,7 +544,7 @@ pub trait ModelExt {
 		device: &wgpu::Device,
 		physics: &PhysicsState,
 		drum: &GpuDrum,
-		instances: Vec<Instance>,
+		instances: &[Index],
 	) -> GpuModel;
 }
 
@@ -536,7 +554,7 @@ impl ModelExt for ira_drum::Model {
 		device: &wgpu::Device,
 		physics: &PhysicsState,
 		drum: &GpuDrum,
-		instances: Vec<Instance>,
+		instances: &[Index],
 	) -> GpuModel {
 		GpuModel::new(
 			device,

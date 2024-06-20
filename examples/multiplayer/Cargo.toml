@@ -1,0 +1,11 @@
+[package]
+name = "multiplayer"
+edition = "2021"
+authors = ["Matthew Polak <git@matteopolak.com>"]
+license = "MIT"
+
+[dependencies]
+ira.path = "../../ira"
+ira_drum.path = "../../ira_drum"
+basic.path = "../basic"
+tokio = { version = "1", features = ["rt-multi-thread"] }

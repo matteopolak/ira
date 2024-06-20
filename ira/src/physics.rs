@@ -1,5 +1,6 @@
 use glam::Vec3;
 use rapier3d::{
+	data::Index,
 	dynamics::{
 		CCDSolver, ImpulseJointSet, IntegrationParameters, IslandManager, MultibodyJointSet,
 		RigidBodyBuilder, RigidBodyHandle, RigidBodySet,
@@ -84,7 +85,12 @@ impl PhysicsState {
 	/// Adds a new instance to the physics world.
 	///
 	/// Modifies the provided instance to include the rigid body and collider handles.
-	fn add_instance(&mut self, instance: InstanceBuilder) -> Instance {
+	fn add_instance(
+		&mut self,
+		instance: InstanceBuilder,
+		model_id: u32,
+		instance_id: u32,
+	) -> Instance {
 		let mut new_instance = Instance {
 			scale: instance.scale,
 			collider: None,
@@ -92,6 +98,8 @@ impl PhysicsState {
 				position: instance.position,
 				rotation: instance.rotation,
 			},
+			model_id,
+			instance_id,
 		};
 
 		if let Some(body) = instance.rigidbody {
@@ -111,6 +119,26 @@ impl PhysicsState {
 		}
 
 		new_instance
+	}
+}
+
+pub trait IndexExt {
+	fn to_u128(&self) -> u128;
+	fn from_u128(id: u128) -> Self;
+}
+
+impl IndexExt for Index {
+	fn to_u128(&self) -> u128 {
+		let (idx, gen) = self.into_raw_parts();
+
+		(idx as u128) << 32 | gen as u128
+	}
+
+	fn from_u128(id: u128) -> Self {
+		let idx = (id >> 32) as u32;
+		let gen = id as u32;
+
+		Self::from_raw_parts(idx, gen)
 	}
 }
 
@@ -170,68 +198,62 @@ impl Context {
 	///
 	/// If you only want to insert a rigidbody with no model,
 	/// use [`Context::add_rigidbody`] or [`Context::add_collider`] instead.
-	pub fn add_instance(
-		&mut self,
-		model_id: usize,
-		mut instance: InstanceBuilder,
-	) -> InstanceHandle {
-		let model = &mut self.drum.models[model_id];
-		let handle = InstanceHandle::new(model_id, model.instances.len());
+	pub fn add_instance(&mut self, model_id: u32, mut instance: InstanceBuilder) -> Index {
+		let model = &mut self.drum.models[model_id as usize];
+		let instance_id = model.instances.len() as u32;
 
-		let (axis, angle) = instance.rotation.to_axis_angle();
+		self.drum.instances.insert_with(|handle| {
+			let (axis, angle) = instance.rotation.to_axis_angle();
 
-		match (instance.rigidbody, instance.collider) {
-			(Some(body), collider) => {
-				if collider.is_none() {
-					instance.collider = Some(model.bounds.to_cuboid(instance.scale).mass(1.0));
-				} else {
-					instance.collider = collider;
+			match (instance.rigidbody, instance.collider) {
+				(Some(body), collider) => {
+					instance.collider =
+						collider.or_else(|| Some(model.bounds.to_cuboid(instance.scale).mass(1.0)));
+
+					instance.rigidbody = Some(
+						body.position(instance.position.into())
+							.rotation((axis * angle).into())
+							.user_data(handle.to_u128()),
+					);
 				}
-
-				instance.rigidbody = Some(
-					body.position(instance.position.into())
-						.rotation((axis * angle).into())
-						.user_data(handle.into()),
-				);
+				(body, Some(collider)) => {
+					instance.rigidbody = body;
+					instance.collider = Some(
+						collider
+							.position(instance.position.into())
+							.rotation((axis * angle).into()),
+					);
+				}
+				(body, None) => {
+					instance.rigidbody = body;
+					instance.collider = Some(
+						model
+							.bounds
+							.to_cuboid(instance.scale)
+							.position(instance.position.into())
+							.rotation((axis * angle).into()),
+					);
+				}
 			}
-			(body, Some(collider)) => {
-				instance.rigidbody = body;
-				instance.collider = Some(
-					collider
-						.position(instance.position.into())
-						.rotation((axis * angle).into()),
-				);
-			}
-			(body, None) => {
-				instance.rigidbody = body;
-				instance.collider = Some(
-					model
-						.bounds
-						.to_cuboid(instance.scale)
-						.position(instance.position.into())
-						.rotation((axis * angle).into()),
-				);
-			}
-		}
 
-		let instance = self.physics.add_instance(instance);
+			let instance = self.physics.add_instance(instance, model_id, instance_id);
 
-		model.instances.push(instance.to_gpu(&self.physics));
-		model.instance_data.push(instance);
+			model.instances.push(instance.to_gpu(&self.physics));
 
-		handle
+			instance
+		})
 	}
 }
 
 #[derive(Debug, Clone, Copy)]
 pub struct InstanceHandle {
-	model: usize,
-	instance: usize,
+	model: u32,
+	instance: u32,
 }
 
 impl InstanceHandle {
 	#[must_use]
-	pub fn new(model: usize, instance: usize) -> Self {
+	pub fn new(model: u32, instance: u32) -> Self {
 		Self { model, instance }
 	}
 
@@ -239,8 +261,8 @@ impl InstanceHandle {
 		let model = self.resolve_model(drum);
 
 		(
-			&model.instances[self.instance],
-			&model.instance_data[self.instance],
+			&model.instances[self.instance as usize],
+			&model.instance_data[self.instance as usize],
 		)
 	}
 
@@ -252,20 +274,20 @@ impl InstanceHandle {
 		let model = self.resolve_model_mut(drum);
 
 		(
-			&mut model.instances[self.instance],
-			&mut model.instance_data[self.instance],
+			&mut model.instances[self.instance as usize],
+			&mut model.instance_data[self.instance as usize],
 		)
 	}
 
 	/// Returns the model associated with the instance.
 	#[must_use]
 	pub fn resolve_model<'d>(&self, drum: &'d GpuDrum) -> &'d GpuModel {
-		&drum.models[self.model]
+		&drum.models[self.model as usize]
 	}
 
 	/// Returns the model associated with the instance.
 	pub fn resolve_model_mut<'d>(&self, drum: &'d mut GpuDrum) -> &'d mut GpuModel {
-		&mut drum.models[self.model]
+		&mut drum.models[self.model as usize]
 	}
 
 	/// Updates the instance with the provided closure.
@@ -288,21 +310,21 @@ impl InstanceHandle {
 		update(instance, &mut ctx.physics);
 		*gpu = instance.to_gpu(&ctx.physics);
 
-		ctx.drum.models[self.model].dirty = true;
+		ctx.drum.models[self.model as usize].dirty = true;
 	}
 }
 
 impl From<u128> for InstanceHandle {
 	fn from(id: u128) -> Self {
 		Self {
-			model: (id >> 64) as usize,
-			instance: id as usize,
+			model: (id >> 32) as u32,
+			instance: id as u32,
 		}
 	}
 }
 
 impl From<InstanceHandle> for u128 {
 	fn from(id: InstanceHandle) -> u128 {
-		(id.model as u128) << 64 | id.instance as u128
+		(id.model as u128) << 32 | id.instance as u128
 	}
 }
