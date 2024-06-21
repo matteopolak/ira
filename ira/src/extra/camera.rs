@@ -48,7 +48,7 @@ impl CameraController {
 
 	/// Updates the camera's rotation based on the mouse delta.
 	/// This should be called every frame.
-	pub fn on_update(&mut self, ctx: &Context, delta: Duration) {
+	pub fn on_update<Message>(&mut self, ctx: &Context<Message>, delta: Duration) {
 		let delta = delta.as_secs_f32();
 		let md = ctx.mouse_delta();
 

@@ -24,23 +24,44 @@ impl From<bitcode::Error> for Error {
 
 #[derive(Debug, bitcode::Encode, bitcode::Decode)]
 pub enum Packet<Message> {
+	/// An instance has been created.
 	CreateInstance(CreateInstance),
+	/// An instance has been deleted.
 	DeleteInstance { id: u32 },
+	/// An instance has been updated.
 	UpdateInstance { id: u32, delta: UpdateInstance },
-	UpdateClientId { id: u32 },
+	/// A new client has connected.
+	CreateClient,
+	/// A client has disconnected.
+	DeleteClient,
+	/// A custom message (application-defined)
 	Custom(Message),
-}
-
-// packet with client id
-#[derive(Debug, bitcode::Encode, bitcode::Decode)]
-pub struct TrustedPacket<Message> {
-	pub client_id: u32,
-	pub packet: Packet<Message>,
 }
 
 impl<Message> Packet<Message> {
 	pub fn new(message: Message) -> Self {
 		Self::Custom(message)
+	}
+
+	pub fn into_trusted(self, client_id: u32) -> TrustedPacket<Message> {
+		TrustedPacket {
+			client_id,
+			inner: self,
+		}
+	}
+
+	pub fn read<R: io::Read>(reader: &mut R) -> Result<Self, Error>
+	where
+		Message: bitcode::DecodeOwned,
+	{
+		let mut len = [0; 4];
+		reader.read_exact(&mut len)?;
+
+		let len = u32::from_le_bytes(len) as usize;
+		let mut data = vec![0; len];
+		reader.read_exact(&mut data)?;
+
+		Ok(bitcode::decode(&data)?)
 	}
 
 	pub fn write_iter<'w, W: Write + 'w>(
@@ -66,11 +87,21 @@ impl<Message> Packet<Message> {
 		Message: bitcode::Encode,
 	{
 		let data = bitcode::encode(self);
+		let len = (data.len() as u32).to_le_bytes();
 
-		writer.write_all(&(data.len() as u32).to_le_bytes())?;
+		writer.write_all(&len)?;
 		writer.write_all(&data)
 	}
+}
 
+// packet with client id
+#[derive(Debug, bitcode::Encode, bitcode::Decode)]
+pub struct TrustedPacket<Message> {
+	pub client_id: u32,
+	pub inner: Packet<Message>,
+}
+
+impl<Message> TrustedPacket<Message> {
 	pub fn read<R: io::Read>(reader: &mut R) -> Result<Self, Error>
 	where
 		Message: bitcode::DecodeOwned,
@@ -83,6 +114,35 @@ impl<Message> Packet<Message> {
 		reader.read_exact(&mut data)?;
 
 		Ok(bitcode::decode(&data)?)
+	}
+
+	pub fn write_iter<'w, W: Write + 'w>(
+		&self,
+		writer: impl IntoIterator<Item = &'w mut W>,
+	) -> io::Result<()>
+	where
+		Message: bitcode::Encode,
+	{
+		let data = bitcode::encode(self);
+		let len = (data.len() as u32).to_le_bytes();
+
+		for writer in writer {
+			writer.write_all(&len)?;
+			writer.write_all(&data)?;
+		}
+
+		Ok(())
+	}
+
+	pub fn write<W: Write>(&self, writer: &mut W) -> io::Result<()>
+	where
+		Message: bitcode::Encode,
+	{
+		let data = bitcode::encode(self);
+		let len = (data.len() as u32).to_le_bytes();
+
+		writer.write_all(&len)?;
+		writer.write_all(&data)
 	}
 }
 

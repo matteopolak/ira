@@ -12,7 +12,7 @@ struct App {
 }
 
 impl ira::App for App {
-	fn on_init(_window: &mut Window) -> Drum {
+	fn on_init() -> Drum {
 		Drum::from_path("car.drum").unwrap()
 	}
 

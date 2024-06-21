@@ -142,7 +142,7 @@ impl IndexExt for Index {
 	}
 }
 
-impl Context {
+impl<Message> Context<Message> {
 	pub fn physics_update(&mut self) {
 		self.physics.step();
 
@@ -200,11 +200,10 @@ impl Context {
 	/// use [`Context::add_rigidbody`] or [`Context::add_collider`] instead.
 	///
 	/// When executed on a non-server client, this will do nothing.
-	pub fn add_instance(&mut self, model_id: u32, mut instance: InstanceBuilder) -> Index {
+	pub fn add_instance(&mut self, model_id: u32, mut instance: InstanceBuilder) -> InstanceHandle {
 		let model = &mut self.drum.models[model_id as usize];
 		let instance_id = model.instances.len() as u32;
-
-		self.drum.instances.insert_with(|handle| {
+		let index = self.drum.instances.insert_with(|handle| {
 			let (axis, angle) = instance.rotation.to_axis_angle();
 
 			match (instance.rigidbody, instance.collider) {
@@ -243,28 +242,29 @@ impl Context {
 			model.instances.push(instance.to_gpu(&self.physics));
 
 			instance
-		})
+		});
+
+		InstanceHandle::new(index)
 	}
 }
 
 #[derive(Debug, Clone, Copy)]
 pub struct InstanceHandle {
-	model: u32,
-	instance: u32,
+	handle: Index,
 }
 
 impl InstanceHandle {
 	#[must_use]
-	pub fn new(model: u32, instance: u32) -> Self {
-		Self { model, instance }
+	pub fn new(handle: Index) -> Self {
+		Self { handle }
 	}
 
 	pub fn resolve<'d>(&self, drum: &'d GpuDrum) -> (&'d GpuInstance, &'d Instance) {
-		let model = self.resolve_model(drum);
+		let instance = drum.instances.get(self.handle).unwrap();
 
 		(
-			&model.instances[self.instance as usize],
-			&model.instance_data[self.instance as usize],
+			&drum.models[instance.model_id as usize].instances[instance.instance_id as usize],
+			instance,
 		)
 	}
 
@@ -273,23 +273,27 @@ impl InstanceHandle {
 		&self,
 		drum: &'d mut GpuDrum,
 	) -> (&'d mut GpuInstance, &'d mut Instance) {
-		let model = self.resolve_model_mut(drum);
+		let instance = drum.instances.get_mut(self.handle).unwrap();
 
 		(
-			&mut model.instances[self.instance as usize],
-			&mut model.instance_data[self.instance as usize],
+			&mut drum.models[instance.model_id as usize].instances[instance.instance_id as usize],
+			instance,
 		)
 	}
 
 	/// Returns the model associated with the instance.
 	#[must_use]
 	pub fn resolve_model<'d>(&self, drum: &'d GpuDrum) -> &'d GpuModel {
-		&drum.models[self.model as usize]
+		let instance = drum.instances.get(self.handle).unwrap();
+
+		&drum.models[instance.model_id as usize]
 	}
 
 	/// Returns the model associated with the instance.
 	pub fn resolve_model_mut<'d>(&self, drum: &'d mut GpuDrum) -> &'d mut GpuModel {
-		&mut drum.models[self.model as usize]
+		let instance = drum.instances.get(self.handle).unwrap();
+
+		&mut drum.models[instance.model_id as usize]
 	}
 
 	/// Updates the instance with the provided closure.
@@ -303,30 +307,30 @@ impl InstanceHandle {
 	///   instance.rotate_y(physics, 0.1);
 	/// });
 	/// ```
-	pub fn update<F>(&self, ctx: &mut Context, update: F)
+	pub fn update<F, Message>(&self, ctx: &mut Context<Message>, update: F)
 	where
 		F: FnOnce(&mut Instance, &mut PhysicsState),
 	{
 		let (gpu, instance) = self.resolve_mut(&mut ctx.drum);
+		let model_id = instance.model_id as usize;
 
 		update(instance, &mut ctx.physics);
 		*gpu = instance.to_gpu(&ctx.physics);
 
-		ctx.drum.models[self.model as usize].dirty = true;
+		ctx.drum.models[model_id].dirty = true;
 	}
 }
 
 impl From<u128> for InstanceHandle {
 	fn from(id: u128) -> Self {
 		Self {
-			model: (id >> 32) as u32,
-			instance: id as u32,
+			handle: Index::from_u128(id),
 		}
 	}
 }
 
 impl From<InstanceHandle> for u128 {
 	fn from(id: InstanceHandle) -> u128 {
-		(id.model as u128) << 32 | id.instance as u128
+		id.handle.to_u128()
 	}
 }

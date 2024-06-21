@@ -1,20 +1,18 @@
 use crate::{
-	camera, client, light,
-	model::Instance,
-	packet::{self, Packet},
+	camera, light,
+	packet::{Packet, TrustedPacket},
 	physics::{InstanceHandle, PhysicsState},
-	render, server, Camera, DrumExt, GpuDrum, GpuTexture, MaterialExt, VertexExt,
+	render, server, Camera, DrumExt, GpuDrum, GpuTexture, MaterialExt,
 };
 
 use std::{
 	collections::BTreeMap,
-	num::NonZeroU32,
 	sync::{mpsc, Arc},
 	time::{self, Duration},
 };
 
 use glam::{Vec2, Vec3};
-use ira_drum::{Drum, Material, Vertex};
+use ira_drum::{Drum, Material};
 use winit::{
 	application::ApplicationHandler,
 	event::{DeviceEvent, KeyEvent, WindowEvent},
@@ -30,7 +28,16 @@ use winit::{
 #[allow(unused_variables)]
 pub trait App<Message = ()> {
 	/// Connects to the server. This is only called on clients.
-	fn connect() -> std::net::TcpStream;
+	#[must_use]
+	fn connect() -> std::net::TcpStream {
+		std::net::TcpStream::connect("127.0.0.1:12345").unwrap()
+	}
+
+	/// Creates a new listener for the server to receive connections.
+	#[must_use]
+	fn listen() -> std::net::TcpListener {
+		std::net::TcpListener::bind("127.0.0.1:12345").unwrap()
+	}
 
 	/// Called once at the start of the program, right after the window
 	/// is created but before anything else is done.
@@ -59,7 +66,7 @@ impl<A, Message> Default for Game<A, Message> {
 	}
 }
 
-impl<A: App, Message> Game<A, Message> {
+impl<A: App<Message>, Message> Game<A, Message> {
 	/// Runs the application.
 	///
 	/// This function will block the current thread until the application is closed.
@@ -67,7 +74,10 @@ impl<A: App, Message> Game<A, Message> {
 	/// # Errors
 	///
 	/// See [`winit::error::EventLoopError`] for errors.
-	pub fn run(mut self) -> Result<(), winit::error::EventLoopError> {
+	pub fn run(mut self) -> Result<(), winit::error::EventLoopError>
+	where
+		Message: bitcode::Encode + bitcode::DecodeOwned + Send + 'static,
+	{
 		let event_loop = EventLoop::new()?;
 
 		event_loop.set_control_flow(ControlFlow::Poll);
@@ -76,7 +86,7 @@ impl<A: App, Message> Game<A, Message> {
 }
 
 /// The game context, containing all game-related data.
-pub struct Context<Message> {
+pub struct Context<Message = ()> {
 	pub window: Arc<Window>,
 	pub camera: Camera,
 
@@ -116,23 +126,14 @@ pub struct Context<Message> {
 	pub(crate) packet_tx: mpsc::Sender<Packet<Message>>,
 	/// Used to receive messages from the thread that communicates with the server.
 	/// If the "server" feature is enabled, this will be directly from the server.
-	pub(crate) packet_rx: mpsc::Receiver<Packet<Message>>,
+	pub(crate) packet_rx: mpsc::Receiver<TrustedPacket<Message>>,
 }
 
 impl<Message> Context<Message> {
-	pub fn pressed(&self, key: KeyCode) -> bool {
-		self.pressed_keys.contains(&key)
-	}
-
-	pub fn just_pressed(&self, key: KeyCode) -> bool {
-		self.just_pressed.contains(&key)
-	}
-
-	pub fn mouse_delta(&self) -> Vec2 {
-		self.mouse_delta
-	}
-
-	async fn new(window: Window, drum: Drum) -> Self {
+	async fn new<A: App<Message>>(window: Window, drum: Drum) -> Self
+	where
+		Message: bitcode::Encode + bitcode::DecodeOwned + Send + 'static,
+	{
 		let window = Arc::new(window);
 		let size = window.inner_size();
 		let instance = wgpu::Instance::default();
@@ -208,14 +209,8 @@ impl<Message> Context<Message> {
 		let (server_packet_tx, packet_rx) = mpsc::channel();
 		let (packet_tx, server_packet_rx) = mpsc::channel();
 
-		#[cfg(feature = "server")]
 		std::thread::spawn(move || {
-			server::run(server_packet_rx, server_packet_tx);
-		});
-
-		#[cfg(all(feature = "client", not(feature = "server")))]
-		std::thread::spawn(move || {
-			client::run(packet_rx, packet_tx);
+			server::run::<A, _>(server_packet_tx, server_packet_rx);
 		});
 
 		Self {
@@ -254,6 +249,18 @@ impl<Message> Context<Message> {
 			packet_tx,
 			packet_rx,
 		}
+	}
+
+	pub fn pressed(&self, key: KeyCode) -> bool {
+		self.pressed_keys.contains(&key)
+	}
+
+	pub fn just_pressed(&self, key: KeyCode) -> bool {
+		self.just_pressed.contains(&key)
+	}
+
+	pub fn mouse_delta(&self) -> Vec2 {
+		self.mouse_delta
 	}
 
 	fn resize(&mut self, size: winit::dpi::PhysicalSize<u32>) {
@@ -389,7 +396,7 @@ impl<Message> Context<Message> {
 	}
 }
 
-impl<A: App> Game<A> {
+impl<A: App<Message>, Message> Game<A, Message> {
 	fn render(&mut self, event_loop: &ActiveEventLoop) {
 		let Some((ctx, app)) = self.state.as_mut() else {
 			return;
@@ -404,7 +411,7 @@ impl<A: App> Game<A> {
 			app.on_fixed_update(ctx);
 		}
 
-		#[cfg(feature = "render")]
+		#[cfg(feature = "client")]
 		{
 			let delta = ctx.last_frame.elapsed();
 
@@ -436,7 +443,10 @@ impl<A: App> Game<A> {
 	}
 }
 
-impl<A: App> ApplicationHandler for Game<A> {
+impl<A: App<Message>, Message> ApplicationHandler for Game<A, Message>
+where
+	Message: bitcode::Encode + bitcode::DecodeOwned + Send + 'static,
+{
 	fn resumed(&mut self, event_loop: &ActiveEventLoop) {
 		let window = event_loop
 			.create_window(WindowAttributes::default().with_title("Triangle"))
@@ -446,7 +456,7 @@ impl<A: App> ApplicationHandler for Game<A> {
 		window.set_cursor_visible(false);
 
 		let drum = A::on_init();
-		let mut ctx = pollster::block_on(Context::new(window, drum));
+		let mut ctx = pollster::block_on(Context::<Message>::new::<A>(window, drum));
 		let app = A::on_ready(&mut ctx);
 
 		self.state = Some((ctx, app));

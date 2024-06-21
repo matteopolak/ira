@@ -15,10 +15,6 @@ struct App {
 }
 
 impl ira::App for App {
-	fn connect() -> std::net::TcpStream {
-		std::net::TcpStream::connect("127.0.0.1:12345").unwrap()
-	}
-
 	fn on_init() -> Drum {
 		Drum::from_path("car.drum").unwrap()
 	}
