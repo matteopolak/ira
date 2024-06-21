@@ -24,4 +24,6 @@ wgpu = "0.20"
 winit = "0.30"
 
 [features]
-render = []
+client = []
+server = []
+

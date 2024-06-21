@@ -1,7 +1,7 @@
 use crate::{
 	camera, client, light,
 	model::Instance,
-	packet,
+	packet::{self, Packet},
 	physics::{InstanceHandle, PhysicsState},
 	render, server, Camera, DrumExt, GpuDrum, GpuTexture, MaterialExt, VertexExt,
 };
@@ -28,7 +28,7 @@ use winit::{
 ///
 /// For networked games, implement the [`Network`] trait as well.
 #[allow(unused_variables)]
-pub trait App<Message = ()>: client::Client<Message> + server::Server<Message> {
+pub trait App<Message = ()> {
 	/// Connects to the server. This is only called on clients.
 	fn connect() -> std::net::TcpStream;
 
@@ -112,8 +112,10 @@ pub struct Context<Message> {
 	pub(crate) instances: BTreeMap<u32, InstanceHandle>,
 
 	/// Used to send messages to the thread that communicates with the server.
-	pub(crate) message_tx: mpsc::Sender<Message>,
+	/// If the "server" feature is enabled, this will be directly to the server.
+	pub(crate) packet_tx: mpsc::Sender<Packet<Message>>,
 	/// Used to receive messages from the thread that communicates with the server.
+	/// If the "server" feature is enabled, this will be directly from the server.
 	pub(crate) packet_rx: mpsc::Receiver<Packet<Message>>,
 }
 
@@ -203,6 +205,19 @@ impl<Message> Context<Message> {
 
 		let multisampled_texture = GpuTexture::create_multisampled(&device, &config, sample_count);
 
+		let (server_packet_tx, packet_rx) = mpsc::channel();
+		let (packet_tx, server_packet_rx) = mpsc::channel();
+
+		#[cfg(feature = "server")]
+		std::thread::spawn(move || {
+			server::run(server_packet_rx, server_packet_tx);
+		});
+
+		#[cfg(all(feature = "client", not(feature = "server")))]
+		std::thread::spawn(move || {
+			client::run(packet_rx, packet_tx);
+		});
+
 		Self {
 			window,
 			device,
@@ -235,6 +250,9 @@ impl<Message> Context<Message> {
 			mouse_delta: Vec2::ZERO,
 
 			instances: BTreeMap::new(),
+
+			packet_tx,
+			packet_rx,
 		}
 	}
 

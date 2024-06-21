@@ -31,9 +31,34 @@ pub enum Packet<Message> {
 	Custom(Message),
 }
 
+// packet with client id
+#[derive(Debug, bitcode::Encode, bitcode::Decode)]
+pub struct TrustedPacket<Message> {
+	pub client_id: u32,
+	pub packet: Packet<Message>,
+}
+
 impl<Message> Packet<Message> {
 	pub fn new(message: Message) -> Self {
 		Self::Custom(message)
+	}
+
+	pub fn write_iter<'w, W: Write + 'w>(
+		&self,
+		writer: impl IntoIterator<Item = &'w mut W>,
+	) -> io::Result<()>
+	where
+		Message: bitcode::Encode,
+	{
+		let data = bitcode::encode(self);
+		let len = (data.len() as u32).to_le_bytes();
+
+		for writer in writer {
+			writer.write_all(&len)?;
+			writer.write_all(&data)?;
+		}
+
+		Ok(())
 	}
 
 	pub fn write<W: Write>(&self, writer: &mut W) -> io::Result<()>

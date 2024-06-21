@@ -8,6 +8,7 @@
 #![allow(clippy::default_trait_access)]
 
 pub mod camera;
+#[cfg(feature = "client")]
 pub mod client;
 pub mod drum;
 pub mod extra;
@@ -18,6 +19,7 @@ pub mod model;
 pub mod packet;
 pub mod physics;
 pub mod render;
+#[cfg(feature = "server")]
 pub mod server;
 pub(crate) mod texture;
 

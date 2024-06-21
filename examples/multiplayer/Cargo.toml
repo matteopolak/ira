@@ -11,6 +11,7 @@ basic.path = "../basic"
 tokio = { version = "1", features = ["rt-multi-thread"] }
 
 [features]
-default = ["render"]
-render = ["ira/render"]
+default = ["client", "server"]
+client = ["ira/client"]
+server = ["ira/server"]
 
