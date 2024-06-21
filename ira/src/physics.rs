@@ -1,3 +1,5 @@
+use std::ops;
+
 use glam::Vec3;
 use rapier3d::{
 	data::Index,
@@ -9,7 +11,11 @@ use rapier3d::{
 	pipeline::PhysicsPipeline,
 };
 
-use crate::{game::Context, Body, GpuDrum, GpuInstance, GpuModel, Instance, InstanceBuilder};
+use crate::{
+	game::Context,
+	packet::{CreateInstance, Packet, UpdateInstance},
+	Body, GpuDrum, GpuInstance, GpuModel, Instance, InstanceBuilder,
+};
 
 #[derive(Debug, Clone, Copy)]
 pub struct BoundingBox {
@@ -159,9 +165,32 @@ impl<Message> Context<Message> {
 
 			instance.resolve_model_mut(&mut self.drum).dirty = true;
 
-			let (gpu, instance) = instance.resolve_mut(&mut self.drum);
+			{
+				let (gpu, instance) = instance.resolve_mut(&mut self.drum);
 
-			*gpu = instance.to_gpu(&self.physics);
+				*gpu = instance.to_gpu(&self.physics);
+			}
+
+			#[cfg(feature = "server")]
+			{
+				let Some(id) = self.instances.get(&instance) else {
+					continue;
+				};
+
+				let (position, rotation) = (*body.position()).into();
+
+				self.packet_tx
+					.send(Packet::UpdateInstance {
+						id: *id,
+						delta: UpdateInstance {
+							position,
+							rotation,
+							scale: None,
+							body: None,
+						},
+					})
+					.unwrap();
+			}
 		}
 	}
 
@@ -194,13 +223,67 @@ impl<Message> Context<Message> {
 		self.physics.colliders.insert(collider.build())
 	}
 
+	pub fn remove_instance_local(&mut self, instance_id: u32) -> Option<Instance> {
+		let Some(instance) = self.handles.remove(&instance_id) else {
+			return None;
+		};
+
+		self.instances.remove(&instance);
+
+		let Some(instance) = self.drum.instances.remove(*instance) else {
+			return None;
+		};
+
+		// swap_remove the gpu instance, then update the other instance pointing to the one at the end
+		let model = &mut self.drum.models[instance.model_id as usize];
+
+		model.instances.swap_remove(instance.instance_id as usize);
+
+		// now, we need to know which instance owns that swapped one in O(1)
+		model.handles.swap_remove(instance.instance_id as usize);
+
+		// update the instance that was swapped
+		let handle = model.handles[instance.instance_id as usize];
+		let other_instance = self.drum.instances.get_mut(*handle).unwrap();
+
+		other_instance.instance_id = instance.instance_id;
+
+		Some(instance)
+	}
+
+	#[cfg(not(feature = "server"))]
+	pub fn add_instance(&mut self, model_id: u32, instance: InstanceBuilder) {
+		self.packet_tx
+			.send(Packet::CreateInstance {
+				id: 0,
+				options: CreateInstance::from_builder(instance, model_id),
+			})
+			.unwrap();
+	}
+
+	#[cfg(feature = "server")]
+	pub fn add_instance(&mut self, model_id: u32, instance: InstanceBuilder) -> InstanceHandle {
+		self.packet_tx
+			.send(Packet::CreateInstance {
+				id: 0,
+				options: CreateInstance::from_builder(&instance, model_id),
+			})
+			.unwrap();
+
+		self.add_instance_local(model_id, instance)
+	}
+
 	/// Adds a new instance to the drum and physics world.
 	///
 	/// If you only want to insert a rigidbody with no model,
 	/// use [`Context::add_rigidbody`] or [`Context::add_collider`] instead.
 	///
-	/// When executed on a non-server client, this will do nothing.
-	pub fn add_instance(&mut self, model_id: u32, mut instance: InstanceBuilder) -> InstanceHandle {
+	/// The networked version of this method is [`Context::add_instance`].
+	pub fn add_instance_local(
+		&mut self,
+		model_id: u32,
+		mut instance: InstanceBuilder,
+	) -> InstanceHandle {
 		let model = &mut self.drum.models[model_id as usize];
 		let instance_id = model.instances.len() as u32;
 		let index = self.drum.instances.insert_with(|handle| {
@@ -248,7 +331,7 @@ impl<Message> Context<Message> {
 	}
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct InstanceHandle {
 	handle: Index,
 }
@@ -332,5 +415,13 @@ impl From<u128> for InstanceHandle {
 impl From<InstanceHandle> for u128 {
 	fn from(id: InstanceHandle) -> u128 {
 		id.handle.to_u128()
+	}
+}
+
+impl ops::Deref for InstanceHandle {
+	type Target = Index;
+
+	fn deref(&self) -> &Self::Target {
+		&self.handle
 	}
 }

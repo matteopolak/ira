@@ -1,8 +1,9 @@
 use std::io::{self, Write};
 
 use glam::{Quat, Vec3};
+use rapier3d::{dynamics::RigidBodyBuilder, geometry::ColliderBuilder};
 
-use crate::{physics::PhysicsState, Body, Instance};
+use crate::{physics::PhysicsState, Body, Instance, InstanceBuilder};
 
 // TODO: implement Display and Error
 pub enum Error {
@@ -25,13 +26,13 @@ impl From<bitcode::Error> for Error {
 #[derive(Debug, bitcode::Encode, bitcode::Decode)]
 pub enum Packet<Message> {
 	/// An instance has been created.
-	CreateInstance(CreateInstance),
+	CreateInstance { options: CreateInstance, id: u32 },
 	/// An instance has been deleted.
 	DeleteInstance { id: u32 },
 	/// An instance has been updated.
 	UpdateInstance { id: u32, delta: UpdateInstance },
 	/// A new client has connected.
-	CreateClient,
+	CreateClient { instance_id: u32 },
 	/// A client has disconnected.
 	DeleteClient,
 	/// A custom message (application-defined)
@@ -149,19 +150,82 @@ impl<Message> TrustedPacket<Message> {
 /// A packet for creating a new collider.
 #[derive(Debug, bitcode::Encode, bitcode::Decode)]
 pub enum CreateCollider {
-	Cuboid { half_extents: Vec3 },
-	Sphere { radius: f32 },
+	Cuboid {
+		half_extents: Vec3,
+	},
+	Sphere {
+		radius: f32,
+	},
+	Capsule {
+		segment_a: Vec3,
+		segment_b: Vec3,
+		radius: f32,
+	},
+	Cylinder {
+		half_height: f32,
+		radius: f32,
+	},
+	Cone {
+		half_height: f32,
+		radius: f32,
+	},
+}
+
+impl CreateCollider {
+	pub fn from_builder(builder: &ColliderBuilder) -> Self {
+		let ball = builder.shape.as_ball();
+
+		if let Some(ball) = ball {
+			return Self::Sphere {
+				radius: ball.radius,
+			};
+		}
+
+		let cuboid = builder.shape.as_cuboid();
+
+		if let Some(cuboid) = cuboid {
+			return Self::Cuboid {
+				half_extents: cuboid.half_extents.into(),
+			};
+		}
+
+		let capsule = builder.shape.as_capsule();
+
+		if let Some(capsule) = capsule {
+			return Self::Capsule {
+				segment_a: capsule.segment.a.into(),
+				segment_b: capsule.segment.b.into(),
+				radius: capsule.radius,
+			};
+		}
+
+		let cylinder = builder.shape.as_cylinder();
+
+		if let Some(cylinder) = cylinder {
+			return Self::Cylinder {
+				half_height: cylinder.half_height,
+				radius: cylinder.radius,
+			};
+		}
+
+		let cone = builder.shape.as_cone();
+
+		if let Some(cone) = cone {
+			return Self::Cone {
+				half_height: cone.half_height,
+				radius: cone.radius,
+			};
+		}
+
+		todo!()
+	}
 }
 
 #[derive(Debug, bitcode::Encode, bitcode::Decode)]
 pub enum CreateBody {
-	Static {
-		position: Vec3,
-		rotation: Quat,
-	},
+	Static,
 	Rigid {
-		position: Vec3,
-		rotation: Quat,
+		kind: RigidBodyType,
 		velocity: Vec3,
 		angular_velocity: Vec3,
 	},
@@ -170,11 +234,120 @@ pub enum CreateBody {
 /// A packet for creating a new instance.
 #[derive(Debug, bitcode::Encode, bitcode::Decode)]
 pub struct CreateInstance {
+	pub model_id: u32,
 	pub position: Vec3,
 	pub rotation: Quat,
 	pub scale: Vec3,
 	pub body: CreateBody,
 	pub collider: Option<CreateCollider>,
+}
+
+#[derive(Debug, bitcode::Encode, bitcode::Decode)]
+pub enum RigidBodyType {
+	Dynamic = 0,
+	Fixed = 1,
+	KinematicPositionBased = 2,
+	KinematicVelocityBased = 3,
+}
+
+impl From<RigidBodyType> for rapier3d::dynamics::RigidBodyType {
+	fn from(kind: RigidBodyType) -> Self {
+		match kind {
+			RigidBodyType::Dynamic => Self::Dynamic,
+			RigidBodyType::Fixed => Self::Fixed,
+			RigidBodyType::KinematicPositionBased => Self::KinematicPositionBased,
+			RigidBodyType::KinematicVelocityBased => Self::KinematicVelocityBased,
+		}
+	}
+}
+
+impl From<rapier3d::dynamics::RigidBodyType> for RigidBodyType {
+	fn from(kind: rapier3d::dynamics::RigidBodyType) -> Self {
+		match kind {
+			rapier3d::dynamics::RigidBodyType::Dynamic => Self::Dynamic,
+			rapier3d::dynamics::RigidBodyType::Fixed => Self::Fixed,
+			rapier3d::dynamics::RigidBodyType::KinematicPositionBased => {
+				Self::KinematicPositionBased
+			}
+			rapier3d::dynamics::RigidBodyType::KinematicVelocityBased => {
+				Self::KinematicVelocityBased
+			}
+		}
+	}
+}
+
+impl CreateInstance {
+	pub fn into_builder(self) -> InstanceBuilder {
+		let instance = Instance::builder()
+			.position(self.position)
+			.rotation(self.rotation)
+			.scale(self.scale);
+
+		let instance = match self.collider {
+			None => instance,
+			Some(collider) => instance.collider(match collider {
+				CreateCollider::Cuboid { half_extents } => {
+					ColliderBuilder::cuboid(half_extents.x, half_extents.y, half_extents.z)
+				}
+				CreateCollider::Sphere { radius } => ColliderBuilder::ball(radius),
+				CreateCollider::Capsule {
+					segment_a,
+					segment_b,
+					radius,
+				} => ColliderBuilder::capsule_from_endpoints(
+					segment_a.into(),
+					segment_b.into(),
+					radius,
+				),
+				CreateCollider::Cylinder {
+					half_height,
+					radius,
+				} => ColliderBuilder::cylinder(half_height, radius),
+				CreateCollider::Cone {
+					half_height,
+					radius,
+				} => ColliderBuilder::cone(half_height, radius),
+			}),
+		};
+
+		match self.body {
+			CreateBody::Static => instance,
+			CreateBody::Rigid {
+				velocity,
+				angular_velocity,
+				kind,
+			} => instance.rigidbody(
+				RigidBodyBuilder::new(kind.into())
+					.linvel(velocity.into())
+					.angvel(angular_velocity.into()),
+			),
+		}
+	}
+
+	pub fn from_builder(builder: &InstanceBuilder, model_id: u32) -> Self {
+		let (position, rotation) = (builder.position, builder.rotation);
+		let scale = builder.scale;
+
+		let body = builder
+			.rigidbody
+			.as_ref()
+			.map_or(CreateBody::Static, |body| CreateBody::Rigid {
+				velocity: body.linvel.into(),
+				angular_velocity: body.angvel.into(),
+				kind: body.body_type.into(),
+			});
+
+		let collider = builder.collider.as_ref().map(CreateCollider::from_builder);
+
+		Self {
+			model_id,
+			position,
+			rotation,
+			scale,
+			body,
+			collider,
+		}
+	}
 }
 
 #[derive(Debug, bitcode::Encode, bitcode::Decode)]

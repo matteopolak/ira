@@ -2,6 +2,7 @@ use ira_drum::Vertex;
 
 use crate::{light, Camera, GpuTexture, Instance, VertexExt};
 
+#[must_use]
 pub fn create_render_pipeline(
 	device: &wgpu::Device,
 	layout: &wgpu::PipelineLayout,

@@ -10,29 +10,33 @@ use ira_drum::Drum;
 
 struct App {
 	player: basic::Player,
-	players: Arena<InstanceHandle>,
-	tokio: tokio::runtime::Runtime,
+	cars: Vec<InstanceHandle>,
 }
 
 impl ira::App for App {
+	fn create_player() -> (u32, ira::InstanceBuilder) {
+		(2, ira::Instance::builder())
+	}
+
 	fn on_init() -> Drum {
 		Drum::from_path("car.drum").unwrap()
 	}
 
 	fn on_ready(ctx: &mut Context) -> Self {
 		let car_id = ctx.drum.model_id("bottled_car").unwrap();
-
-		for i in 0..10 {
-			ctx.add_instance(
-				car_id,
-				Instance::builder()
-					.up(Vec3::Z)
-					.rotation(Quat::from_rotation_x(FRAC_PI_4))
-					.position(Vec3::new(0.0, 10.0 + i as f32 * 5.0, 0.0))
-					.scale(Vec3::splat(5.0))
-					.rigidbody(RigidBodyBuilder::dynamic()),
-			);
-		}
+		let cars = (0..10)
+			.map(|i| {
+				ctx.add_instance(
+					car_id,
+					Instance::builder()
+						.up(Vec3::Z)
+						.rotation(Quat::from_rotation_x(FRAC_PI_4))
+						.position(Vec3::new(0.0, 10.0 + i as f32 * 5.0, 0.0))
+						.scale(Vec3::splat(5.0))
+						.rigidbody(RigidBodyBuilder::dynamic()),
+				)
+			})
+			.collect();
 
 		ctx.add_instance(
 			ctx.drum.model_id("boring_cube").unwrap(),
@@ -53,8 +57,7 @@ impl ira::App for App {
 
 		Self {
 			player: basic::Player::new(Instance::from(body_collider)),
-			players: Arena::new(),
-			tokio: tokio::runtime::Runtime::new().unwrap(),
+			cars,
 		}
 	}
 
@@ -64,6 +67,12 @@ impl ira::App for App {
 
 	fn on_update(&mut self, ctx: &mut Context, delta: Duration) {
 		self.player.on_update(ctx, delta);
+
+		for car in &mut self.cars {
+			car.update(ctx, |i, p| {
+				i.rotate_y(p, 0.01);
+			});
+		}
 	}
 }
 

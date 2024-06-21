@@ -14,6 +14,10 @@ struct App {
 }
 
 impl ira::App for App {
+	fn create_player() -> (u32, ira::InstanceBuilder) {
+		(2, ira::Instance::builder())
+	}
+
 	fn on_init() -> Drum {
 		Drum::from_path("car.drum").unwrap()
 	}

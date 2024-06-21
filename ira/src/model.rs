@@ -1,4 +1,4 @@
-use std::{mem, num::NonZeroU32};
+use std::mem;
 
 use bytemuck::{Pod, Zeroable};
 use glam::{Mat4, Quat, Vec3};
@@ -11,7 +11,7 @@ use rapier3d::{
 use wgpu::util::DeviceExt;
 
 use crate::{
-	physics::{BoundingBox, PhysicsState},
+	physics::{BoundingBox, InstanceHandle, PhysicsState},
 	GpuDrum, GpuMesh,
 };
 
@@ -98,8 +98,9 @@ pub struct GpuModel {
 	pub(crate) meshes: GpuMeshHandles,
 	pub(crate) instance_buffer: wgpu::Buffer,
 
-	// INVARIANT: `instances` and `instance_data` are the same length.
+	// INVARIANT: instances.len() == handles.len()
 	pub(crate) instances: Vec<GpuInstance>,
+	pub(crate) handles: Vec<InstanceHandle>,
 	pub(crate) bounds: BoundingBox,
 
 	last_instance_count: usize,
@@ -110,25 +111,21 @@ impl GpuModel {
 	#[must_use]
 	pub fn new(
 		device: &wgpu::Device,
-		physics: &PhysicsState,
 		drum: &GpuDrum,
 		meshes: GpuMeshHandles,
-		instances: &[Index],
 		name: Box<str>,
 	) -> Self {
-		let gpu_instances = instances
-			.iter()
-			.map(|i| drum.instances.get(*i).unwrap().to_gpu(physics))
-			.collect::<Vec<_>>();
 		let (min, max) = meshes.min_max(drum);
 
 		Self {
 			name,
 
 			meshes,
-			instance_buffer: Self::create_instance_buffer(device, &gpu_instances),
-			last_instance_count: instances.len(),
-			instances: gpu_instances,
+			instance_buffer: Self::create_instance_buffer(device, &[]),
+			last_instance_count: 0,
+
+			handles: Vec::new(),
+			instances: Vec::new(),
 
 			bounds: BoundingBox { min, max },
 			dirty: false,
@@ -205,7 +202,7 @@ impl GpuModel {
 }
 
 #[must_use]
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct InstanceBuilder {
 	pub position: Vec3,
 	pub rotation: Quat,
@@ -539,30 +536,11 @@ impl GpuInstance {
 
 pub trait ModelExt {
 	/// Converts the model into a GPU model.
-	fn into_gpu(
-		self,
-		device: &wgpu::Device,
-		physics: &PhysicsState,
-		drum: &GpuDrum,
-		instances: &[Index],
-	) -> GpuModel;
+	fn into_gpu(self, device: &wgpu::Device, drum: &GpuDrum) -> GpuModel;
 }
 
 impl ModelExt for ira_drum::Model {
-	fn into_gpu(
-		self,
-		device: &wgpu::Device,
-		physics: &PhysicsState,
-		drum: &GpuDrum,
-		instances: &[Index],
-	) -> GpuModel {
-		GpuModel::new(
-			device,
-			physics,
-			drum,
-			self.meshes.into(),
-			instances,
-			self.name,
-		)
+	fn into_gpu(self, device: &wgpu::Device, drum: &GpuDrum) -> GpuModel {
+		GpuModel::new(device, drum, self.meshes.into(), self.name)
 	}
 }

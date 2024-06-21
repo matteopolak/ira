@@ -1,10 +1,6 @@
 use std::time::Duration;
 
-use ira::{
-	glam::Vec3,
-	winit::{error::EventLoopError, window::Window},
-	Context, Game, Instance, RigidBodyBuilder,
-};
+use ira::{glam::Vec3, winit::error::EventLoopError, Context, Game, Instance, RigidBodyBuilder};
 use ira_drum::Drum;
 
 struct App {
@@ -12,6 +8,10 @@ struct App {
 }
 
 impl ira::App for App {
+	fn create_player() -> (u32, ira::InstanceBuilder) {
+		(2, ira::Instance::builder())
+	}
+
 	fn on_init() -> Drum {
 		Drum::from_path("car.drum").unwrap()
 	}

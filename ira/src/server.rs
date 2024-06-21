@@ -1,11 +1,15 @@
 use std::{
 	collections::BTreeMap,
+	io,
 	net::TcpStream,
-	sync::{mpsc, Arc, RwLock},
+	sync::{
+		mpsc::{self, TryRecvError},
+		Arc, RwLock,
+	},
 };
 
 use crate::{
-	packet::{Packet, TrustedPacket},
+	packet::{self, Packet, TrustedPacket},
 	App, Context,
 };
 
@@ -62,6 +66,16 @@ where
 		packet
 			.write_iter(self.clients.write().unwrap().values_mut())
 			.unwrap();
+	}
+
+	fn broadcast_clients(
+		&self,
+		packet: TrustedPacket<Message>,
+		clients: &mut BTreeMap<u32, TcpStream>,
+	) {
+		packet
+			.write_iter(clients.iter_mut().map(|(_, stream)| stream))
+			.unwrap();
 
 		self.packet_tx.send(packet).unwrap();
 	}
@@ -89,12 +103,12 @@ where
 			// first, get a pending packet from the local client
 			match self.packet_rx.try_recv() {
 				Ok(packet) => match packet {
-					Packet::CreateInstance(create_instance) => {
+					Packet::CreateInstance { options, .. } => {
 						let id = self.next_instance_id();
 
 						self.owners.insert(id, client_id);
 						self.broadcast(
-							Packet::CreateInstance(create_instance).into_trusted(client_id),
+							Packet::CreateInstance { options, id }.into_trusted(client_id),
 						);
 					}
 					Packet::DeleteInstance { id } => {
@@ -106,8 +120,10 @@ where
 							Packet::UpdateInstance { id, delta }.into_trusted(client_id),
 						);
 					}
-					Packet::CreateClient => {
-						self.broadcast(Packet::CreateClient.into_trusted(client_id));
+					Packet::CreateClient { instance_id } => {
+						self.broadcast(
+							Packet::CreateClient { instance_id }.into_trusted(client_id),
+						);
 					}
 					Packet::DeleteClient => {
 						self.owners.remove(&client_id);
@@ -117,19 +133,32 @@ where
 						self.broadcast(Packet::Custom(message).into_trusted(client_id));
 					}
 				},
-				Err(_) => break,
+				Err(TryRecvError::Empty) => {}
+				Err(TryRecvError::Disconnected) => break,
 			}
+
+			let mut disconnected = Vec::new();
+			let mut packets = Vec::new();
 
 			// then, get any pending packets from clients
 			for (client_id, stream) in self.clients.write().unwrap().iter_mut() {
-				let Ok(packet) = Packet::read(stream) else {
-					continue;
+				let packet = match Packet::read(stream) {
+					Ok(packet) => packet,
+					Err(packet::Error::Io(e)) if e.kind() == io::ErrorKind::WouldBlock => continue,
+					Err(packet::Error::Io(..)) => {
+						eprintln!("Client {} disconnected", client_id);
+						disconnected.push(*client_id);
+						continue;
+					}
+					Err(e) => {
+						continue;
+					}
 				};
 
 				let packet = packet.into_trusted(*client_id);
 
 				match packet.inner {
-					Packet::CreateInstance(..) => {
+					Packet::CreateInstance { .. } => {
 						let id = self.next_instance_id;
 						self.next_instance_id += 1;
 
@@ -142,26 +171,38 @@ where
 						}
 
 						self.owners.remove(&id);
-						self.broadcast(packet);
+						packets.push(packet);
 					}
 					Packet::UpdateInstance { id, .. } => {
 						if self.owners.get(&id) != Some(client_id) {
 							continue;
 						}
 
-						self.broadcast(packet);
+						packets.push(packet);
 					}
-					Packet::CreateClient => {
-						self.broadcast(packet);
+					Packet::CreateClient { .. } => {
+						packets.push(packet);
 					}
 					Packet::DeleteClient => {
 						self.owners.retain(|_, owner| owner != client_id);
 
-						self.broadcast(packet);
+						packets.push(packet);
 					}
 					Packet::Custom(..) => {
-						self.broadcast(packet);
+						packets.push(packet);
 					}
+				}
+			}
+
+			{
+				let mut clients = self.clients.write().unwrap();
+
+				for client_id in disconnected {
+					clients.remove(&client_id);
+				}
+
+				for packet in packets {
+					self.broadcast_clients(packet, &mut clients);
 				}
 			}
 		}
@@ -172,19 +213,13 @@ where
 
 		loop {
 			// read from local
-			match self.packet_rx.try_recv() {
-				Ok(packet) => {
-					packet.write(&mut stream).unwrap();
-				}
-				Err(_) => {}
+			if let Ok(packet) = self.packet_rx.try_recv() {
+				packet.write(&mut stream).unwrap();
 			}
 
 			// read from server
-			match TrustedPacket::read(&mut stream) {
-				Ok(packet) => {
-					self.packet_tx.send(packet).unwrap();
-				}
-				Err(_) => {}
+			if let Ok(packet) = TrustedPacket::read(&mut stream) {
+				self.packet_tx.send(packet).unwrap();
 			}
 		}
 	}

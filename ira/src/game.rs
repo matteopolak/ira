@@ -2,7 +2,7 @@ use crate::{
 	camera, light,
 	packet::{Packet, TrustedPacket},
 	physics::{InstanceHandle, PhysicsState},
-	render, server, Camera, DrumExt, GpuDrum, GpuTexture, MaterialExt,
+	render, server, Camera, DrumExt, GpuDrum, GpuTexture, InstanceBuilder, MaterialExt,
 };
 
 use std::{
@@ -39,6 +39,12 @@ pub trait App<Message = ()> {
 		std::net::TcpListener::bind("127.0.0.1:12345").unwrap()
 	}
 
+	/// Called when a remote player joins the game. This should return
+	/// the model id, and a builder for the instance.
+	fn create_player() -> (u32, InstanceBuilder);
+
+	/// Called when a custom message is received from the server.
+	fn on_message(ctx: &mut Context<Message>, message: Message) {}
 	/// Called once at the start of the program, right after the window
 	/// is created but before anything else is done.
 	fn on_init() -> Drum;
@@ -119,7 +125,12 @@ pub struct Context<Message = ()> {
 	pub(crate) just_pressed: Vec<KeyCode>,
 	pub(crate) mouse_delta: Vec2,
 
-	pub(crate) instances: BTreeMap<u32, InstanceHandle>,
+	// instance_id -> instance
+	pub(crate) handles: BTreeMap<u32, InstanceHandle>,
+	// instance -> instance_id
+	pub(crate) instances: BTreeMap<InstanceHandle, u32>,
+	// client_id -> instance_id
+	pub(crate) clients: BTreeMap<u32, u32>,
 
 	/// Used to send messages to the thread that communicates with the server.
 	/// If the "server" feature is enabled, this will be directly to the server.
@@ -179,7 +190,7 @@ impl<Message> Context<Message> {
 			drum.create_brdf_bind_group(&device, &queue);
 
 		let physics = PhysicsState::default();
-		let drum = drum.into_gpu(&device, &queue, &physics);
+		let drum = drum.into_gpu(&device, &queue);
 
 		let material_bind_group_layout = Material::create_bind_group_layout(&device);
 		let camera_settings = camera::Settings::new(config.width as f32, config.height as f32);
@@ -244,7 +255,9 @@ impl<Message> Context<Message> {
 			just_pressed: Vec::new(),
 			mouse_delta: Vec2::ZERO,
 
+			handles: BTreeMap::new(),
 			instances: BTreeMap::new(),
+			clients: BTreeMap::new(),
 
 			packet_tx,
 			packet_rx,
@@ -397,10 +410,58 @@ impl<Message> Context<Message> {
 }
 
 impl<A: App<Message>, Message> Game<A, Message> {
+	fn on_packet(ctx: &mut Context<Message>, packet: TrustedPacket<Message>) {
+		let client_id = packet.client_id;
+
+		match packet.inner {
+			Packet::Custom(message) => A::on_message(ctx, message),
+			Packet::CreateClient { instance_id } => {
+				let (model_id, instance) = A::create_player();
+				let instance = ctx.add_instance_local(model_id, instance);
+
+				ctx.handles.insert(instance_id, instance);
+				ctx.instances.insert(instance, instance_id);
+			}
+			Packet::DeleteClient => {
+				let Some(instance_id) = ctx.clients.remove(&client_id) else {
+					return;
+				};
+
+				let Some(handle) = ctx.handles.remove(&instance_id) else {
+					return;
+				};
+
+				ctx.instances.remove(&handle);
+			}
+			Packet::CreateInstance { options, id } => {
+				let instance = ctx.add_instance_local(options.model_id, options.into_builder());
+
+				ctx.handles.insert(id, instance);
+				ctx.instances.insert(instance, id);
+			}
+			Packet::DeleteInstance { id } => {
+				ctx.remove_instance_local(id);
+			}
+			Packet::UpdateInstance { id, delta } => {
+				let Some(&mut instance) = ctx.handles.get_mut(&id) else {
+					return;
+				};
+
+				instance.update(ctx, |i, p| {
+					delta.apply(p, i);
+				});
+			}
+		}
+	}
+
 	fn render(&mut self, event_loop: &ActiveEventLoop) {
 		let Some((ctx, app)) = self.state.as_mut() else {
 			return;
 		};
+
+		while let Ok(packet) = ctx.packet_rx.try_recv() {
+			Self::on_packet(ctx, packet);
+		}
 
 		let delta = ctx.last_physics.elapsed();
 

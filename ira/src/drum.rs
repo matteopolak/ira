@@ -2,8 +2,8 @@ use ira_drum::Handle;
 use rapier3d::data::Arena;
 
 use crate::{
-	physics::PhysicsState, GpuMaterial, GpuMesh, GpuModel, GpuTexture, GpuTextureCollection,
-	Instance, MaterialExt, MeshExt, ModelExt, TextureExt,
+	GpuMaterial, GpuMesh, GpuModel, GpuTexture, GpuTextureCollection, Instance, MaterialExt,
+	MeshExt, ModelExt, TextureExt,
 };
 
 #[derive(Debug, Default)]
@@ -45,21 +45,11 @@ pub trait DrumExt {
 		queue: &wgpu::Queue,
 	) -> (wgpu::BindGroup, wgpu::BindGroupLayout);
 
-	fn into_gpu(
-		self,
-		device: &wgpu::Device,
-		queue: &wgpu::Queue,
-		physics: &PhysicsState,
-	) -> GpuDrum;
+	fn into_gpu(self, device: &wgpu::Device, queue: &wgpu::Queue) -> GpuDrum;
 }
 
 impl DrumExt for ira_drum::Drum {
-	fn into_gpu(
-		self,
-		device: &wgpu::Device,
-		queue: &wgpu::Queue,
-		physics: &PhysicsState,
-	) -> GpuDrum {
+	fn into_gpu(self, device: &wgpu::Device, queue: &wgpu::Queue) -> GpuDrum {
 		let mut drum = GpuDrum::default();
 
 		drum.textures.bank = self
@@ -75,7 +65,7 @@ impl DrumExt for ira_drum::Drum {
 		drum.meshes = self.meshes.iter().map(|m| m.to_gpu(device)).collect();
 
 		drum.models = IntoIterator::into_iter(self.models)
-			.map(|m| m.into_gpu(device, physics, &drum, &[]))
+			.map(|m| m.into_gpu(device, &drum))
 			.collect();
 
 		drum

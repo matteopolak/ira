@@ -8,3 +8,8 @@ license = "MIT"
 ira.path = "../../ira"
 ira_drum.path = "../../ira_drum"
 
+[features]
+default = ["client", "server"]
+client = ["ira/client"]
+server = ["ira/server"]
+
