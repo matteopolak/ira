@@ -8,14 +8,18 @@
 #![allow(clippy::default_trait_access)]
 
 pub mod camera;
+pub mod client;
 pub mod drum;
 pub mod extra;
 pub mod game;
 pub mod light;
 pub mod material;
 pub mod model;
+pub mod packet;
 pub mod physics;
-pub mod texture;
+pub mod render;
+pub mod server;
+pub(crate) mod texture;
 
 pub use camera::*;
 pub use drum::*;

@@ -1,4 +1,4 @@
-use std::mem;
+use std::{mem, num::NonZeroU32};
 
 use bytemuck::{Pod, Zeroable};
 use glam::{Mat4, Quat, Vec3};
@@ -388,6 +388,8 @@ pub struct Instance {
 	pub(crate) instance_id: u32,
 	// used to index into the Vec<GpuModel> in GpuDrum
 	pub(crate) model_id: u32,
+	// the client that owns the instance. if this is None, the instance is owned by the server.
+	pub(crate) client_id: Option<NonZeroU32>,
 }
 
 impl From<(RigidBodyHandle, ColliderHandle)> for Instance {
@@ -398,6 +400,7 @@ impl From<(RigidBodyHandle, ColliderHandle)> for Instance {
 			collider: Some(value.1),
 			instance_id: 0,
 			model_id: 0,
+			client_id: None,
 		}
 	}
 }

@@ -1,12 +1,15 @@
 use crate::{
-	camera, light,
+	camera, client, light,
 	model::Instance,
+	packet,
 	physics::{InstanceHandle, PhysicsState},
-	Camera, DrumExt, GpuDrum, GpuTexture, InstanceBuilder, MaterialExt, VertexExt,
+	render, server, Camera, DrumExt, GpuDrum, GpuTexture, MaterialExt, VertexExt,
 };
 
 use std::{
-	sync::Arc,
+	collections::BTreeMap,
+	num::NonZeroU32,
+	sync::{mpsc, Arc},
 	time::{self, Duration},
 };
 
@@ -25,52 +28,38 @@ use winit::{
 ///
 /// For networked games, implement the [`Network`] trait as well.
 #[allow(unused_variables)]
-pub trait App {
+pub trait App<Message = ()>: client::Client<Message> + server::Server<Message> {
+	/// Connects to the server. This is only called on clients.
+	fn connect() -> std::net::TcpStream;
+
 	/// Called once at the start of the program, right after the window
 	/// is created but before anything else is done.
 	fn on_init() -> Drum;
 	/// Called once when everything has been created on the GPU.
-	fn on_ready(ctx: &mut Context) -> Self;
+	fn on_ready(ctx: &mut Context<Message>) -> Self;
 	/// Called once per frame, right before rendering. Note that this
 	/// will not be called if the `render` feature is not enabled.
-	fn on_update(&mut self, ctx: &mut Context, delta: Duration) {}
+	fn on_update(&mut self, ctx: &mut Context<Message>, delta: Duration) {}
 	/// Called every 1/60th of a second. If queued at the same time as an update,
 	/// this will always be called first.
-	fn on_fixed_update(&mut self, ctx: &mut Context) {}
+	fn on_fixed_update(&mut self, ctx: &mut Context<Message>) {}
 }
 
-pub trait Network {
-	fn on_instance_create(&mut self, ctx: &mut Context, instance: InstanceBuilder);
-	fn on_instance_remove(&mut self, ctx: &mut Context, instance: InstanceHandle);
-	/// Called when an instance is updated.
-	///
-	/// For the server, this should send the rigidbody's position
-	/// to each connected client.
-	///
-	/// For clients, this is called when a rigidbody's position is
-	/// received from the server.
-	///
-	/// In order to guarantee that instance handles are synchronized,
-	/// clients created new instances must wait until the server
-	/// sends the instance handle back to them.
-	fn on_instance_update(&mut self, ctx: &mut Context, instance: InstanceHandle);
-	/// Called when a client connects to the server.
-	fn on_client_connect(&mut self, ctx: &mut Context, client_id: u32) {}
-	/// Called when a client disconnects from the server.
-	fn on_client_disconnect(&mut self, ctx: &mut Context, client_id: u32) {}
+/// A game instance.
+///
+/// [`A`] is the application type (that implements [`App`]).
+/// [`Message`] is the custom message that can be sent between the client and server.
+pub struct Game<A, Message = ()> {
+	state: Option<(Context<Message>, A)>,
 }
 
-pub struct Game<A> {
-	state: Option<(Context, A)>,
-}
-
-impl<A> Default for Game<A> {
+impl<A, Message> Default for Game<A, Message> {
 	fn default() -> Self {
 		Self { state: None }
 	}
 }
 
-impl<A: App> Game<A> {
+impl<A: App, Message> Game<A, Message> {
 	/// Runs the application.
 	///
 	/// This function will block the current thread until the application is closed.
@@ -86,55 +75,8 @@ impl<A: App> Game<A> {
 	}
 }
 
-fn create_render_pipeline(
-	device: &wgpu::Device,
-	layout: &wgpu::PipelineLayout,
-	target: wgpu::ColorTargetState,
-	depth_write_enabled: bool,
-	shader: &wgpu::ShaderModule,
-	sample_count: u32,
-) -> wgpu::RenderPipeline {
-	device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-		label: None,
-		layout: Some(layout),
-		vertex: wgpu::VertexState {
-			module: shader,
-			entry_point: "vs_main",
-			buffers: &[Vertex::desc(), Instance::desc()],
-			compilation_options: Default::default(),
-		},
-		fragment: Some(wgpu::FragmentState {
-			module: shader,
-			entry_point: "fs_main",
-			compilation_options: Default::default(),
-			targets: &[Some(target)],
-		}),
-		primitive: wgpu::PrimitiveState {
-			conservative: false,
-			topology: wgpu::PrimitiveTopology::TriangleList,
-			strip_index_format: None,
-			front_face: wgpu::FrontFace::Ccw,
-			cull_mode: Some(wgpu::Face::Back),
-			polygon_mode: wgpu::PolygonMode::Fill,
-			unclipped_depth: false,
-		},
-		depth_stencil: Some(wgpu::DepthStencilState {
-			format: GpuTexture::DEPTH_FORMAT,
-			depth_write_enabled,
-			depth_compare: wgpu::CompareFunction::LessEqual,
-			stencil: wgpu::StencilState::default(),
-			bias: wgpu::DepthBiasState::default(),
-		}),
-		multisample: wgpu::MultisampleState {
-			count: sample_count,
-			..Default::default()
-		},
-		multiview: None,
-	})
-}
-
 /// The game context, containing all game-related data.
-pub struct Context {
+pub struct Context<Message> {
 	pub window: Arc<Window>,
 	pub camera: Camera,
 
@@ -166,105 +108,16 @@ pub struct Context {
 	pub(crate) pressed_keys: Vec<KeyCode>,
 	pub(crate) just_pressed: Vec<KeyCode>,
 	pub(crate) mouse_delta: Vec2,
+
+	pub(crate) instances: BTreeMap<u32, InstanceHandle>,
+
+	/// Used to send messages to the thread that communicates with the server.
+	pub(crate) message_tx: mpsc::Sender<Message>,
+	/// Used to receive messages from the thread that communicates with the server.
+	pub(crate) packet_rx: mpsc::Receiver<Packet<Message>>,
 }
 
-async fn request_device(adapter: &wgpu::Adapter) -> (wgpu::Device, wgpu::Queue) {
-	adapter
-		.request_device(
-			&wgpu::DeviceDescriptor {
-				label: None,
-				required_features: wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES
-					| wgpu::Features::TEXTURE_COMPRESSION_BC,
-				required_limits: wgpu::Limits::downlevel_defaults()
-					.using_resolution(adapter.limits()),
-			},
-			None,
-		)
-		.await
-		.expect("failed to create device")
-}
-
-async fn request_adapter(instance: &wgpu::Instance, surface: &wgpu::Surface<'_>) -> wgpu::Adapter {
-	instance
-		.request_adapter(&wgpu::RequestAdapterOptions {
-			power_preference: wgpu::PowerPreference::default(),
-			force_fallback_adapter: false,
-			compatible_surface: Some(surface),
-		})
-		.await
-		.expect("failed to find an appropriate adapter")
-}
-
-#[allow(clippy::too_many_arguments)]
-fn create_pbr_render_pipelines(
-	device: &wgpu::Device,
-	material_bind_group_layout: &wgpu::BindGroupLayout,
-	brdf_bind_group_layout: &wgpu::BindGroupLayout,
-	camera: &Camera,
-	lights: &light::Lights,
-	sample_count: u32,
-) -> (wgpu::RenderPipeline, wgpu::RenderPipeline) {
-	let shader = device.create_shader_module(wgpu::include_wgsl!(concat!(
-		env!("CARGO_MANIFEST_DIR"),
-		"/shaders/pbr.wgsl"
-	)));
-
-	let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-		label: None,
-		bind_group_layouts: &[
-			material_bind_group_layout,
-			&camera.gpu.bind_group_layout,
-			&lights.bind_group_layout,
-			brdf_bind_group_layout,
-		],
-		push_constant_ranges: &[],
-	});
-
-	let opaque_render_pipeline = create_render_pipeline(
-		device,
-		&pipeline_layout,
-		wgpu::ColorTargetState {
-			format: wgpu::TextureFormat::Rgba8UnormSrgb,
-			blend: None,
-			write_mask: wgpu::ColorWrites::ALL,
-		},
-		true,
-		&shader,
-		sample_count,
-	);
-
-	let transparent_render_pipeline = {
-		let transparent_target = wgpu::ColorTargetState {
-			format: wgpu::TextureFormat::Rgba8UnormSrgb,
-			blend: Some(wgpu::BlendState {
-				color: wgpu::BlendComponent {
-					src_factor: wgpu::BlendFactor::SrcAlpha,
-					dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
-					operation: wgpu::BlendOperation::Add,
-				},
-				alpha: wgpu::BlendComponent {
-					src_factor: wgpu::BlendFactor::One,
-					dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
-					operation: wgpu::BlendOperation::Add,
-				},
-			}),
-			write_mask: wgpu::ColorWrites::COLOR,
-		};
-
-		create_render_pipeline(
-			device,
-			&pipeline_layout,
-			transparent_target,
-			false,
-			&shader,
-			sample_count,
-		)
-	};
-
-	(opaque_render_pipeline, transparent_render_pipeline)
-}
-
-impl Context {
+impl<Message> Context<Message> {
 	pub fn pressed(&self, key: KeyCode) -> bool {
 		self.pressed_keys.contains(&key)
 	}
@@ -283,9 +136,9 @@ impl Context {
 		let instance = wgpu::Instance::default();
 
 		let surface = instance.create_surface(window.clone()).unwrap();
-		let adapter = request_adapter(&instance, &surface).await;
+		let adapter = render::request_adapter(&instance, &surface).await;
 
-		let (device, queue) = request_device(&adapter).await;
+		let (device, queue) = render::request_device(&adapter).await;
 
 		let config = wgpu::SurfaceConfiguration {
 			usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
@@ -338,14 +191,15 @@ impl Context {
 			&device,
 		);
 
-		let (opaque_render_pipeline, transparent_render_pipeline) = create_pbr_render_pipelines(
-			&device,
-			&material_bind_group_layout,
-			&brdf_bind_group_layout,
-			&camera,
-			&lights,
-			sample_count,
-		);
+		let (opaque_render_pipeline, transparent_render_pipeline) =
+			render::create_pbr_render_pipelines(
+				&device,
+				&material_bind_group_layout,
+				&brdf_bind_group_layout,
+				&camera,
+				&lights,
+				sample_count,
+			);
 
 		let multisampled_texture = GpuTexture::create_multisampled(&device, &config, sample_count);
 
@@ -379,6 +233,8 @@ impl Context {
 			pressed_keys: Vec::new(),
 			just_pressed: Vec::new(),
 			mouse_delta: Vec2::ZERO,
+
+			instances: BTreeMap::new(),
 		}
 	}
 
@@ -636,10 +492,6 @@ impl<A: App> ApplicationHandler for Game<A> {
 					}
 
 					match key {
-						KeyCode::Escape => {
-							ctx.window.set_cursor_grab(CursorGrabMode::None).unwrap();
-							ctx.window.set_cursor_visible(true);
-						}
 						KeyCode::F11 if ctx.window.fullscreen().is_none() => {
 							ctx.window
 								.set_fullscreen(Some(Fullscreen::Borderless(None)));

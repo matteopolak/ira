@@ -9,3 +9,8 @@ ira.path = "../../ira"
 ira_drum.path = "../../ira_drum"
 basic.path = "../basic"
 tokio = { version = "1", features = ["rt-multi-thread"] }
+
+[features]
+default = ["render"]
+render = ["ira/render"]
+

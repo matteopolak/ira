@@ -198,6 +198,8 @@ impl Context {
 	///
 	/// If you only want to insert a rigidbody with no model,
 	/// use [`Context::add_rigidbody`] or [`Context::add_collider`] instead.
+	///
+	/// When executed on a non-server client, this will do nothing.
 	pub fn add_instance(&mut self, model_id: u32, mut instance: InstanceBuilder) -> Index {
 		let model = &mut self.drum.models[model_id as usize];
 		let instance_id = model.instances.len() as u32;
