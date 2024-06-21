@@ -4,7 +4,7 @@ use ira::{
 	glam::{Quat, Vec3},
 	physics::InstanceHandle,
 	winit::error::EventLoopError,
-	Arena, Context, Game, Instance, RigidBodyBuilder,
+	Context, Game, Instance, RigidBodyBuilder,
 };
 use ira_drum::Drum;
 
@@ -14,8 +14,20 @@ struct App {
 }
 
 impl ira::App for App {
-	fn create_player() -> (u32, ira::InstanceBuilder) {
-		(2, ira::Instance::builder())
+	fn create_player(ctx: &mut Context) -> (u32, ira::InstanceBuilder) {
+		(
+			2,
+			ira::Instance::builder()
+				.rigidbody(RigidBodyBuilder::dynamic().lock_rotations())
+				.collider(
+					ctx.drum
+						.model_by_name("orb")
+						.unwrap()
+						.bounds()
+						.to_cuboid(Vec3::splat(0.05))
+						.mass(0.5),
+				),
+		)
 	}
 
 	fn on_init() -> Drum {
@@ -24,6 +36,7 @@ impl ira::App for App {
 
 	fn on_ready(ctx: &mut Context) -> Self {
 		let car_id = ctx.drum.model_id("bottled_car").unwrap();
+		#[cfg(feature = "server")]
 		let cars = (0..10)
 			.map(|i| {
 				ctx.add_instance(
@@ -37,7 +50,10 @@ impl ira::App for App {
 				)
 			})
 			.collect();
+		#[cfg(not(feature = "server"))]
+		let cars = Vec::new();
 
+		#[cfg(feature = "server")]
 		ctx.add_instance(
 			ctx.drum.model_id("boring_cube").unwrap(),
 			Instance::builder()
@@ -68,14 +84,16 @@ impl ira::App for App {
 	fn on_update(&mut self, ctx: &mut Context, delta: Duration) {
 		self.player.on_update(ctx, delta);
 
-		for car in &mut self.cars {
+		/*for car in &mut self.cars {
 			car.update(ctx, |i, p| {
 				i.rotate_y(p, 0.01);
 			});
-		}
+		}*/
 	}
 }
 
 fn main() -> Result<(), EventLoopError> {
+	tracing_subscriber::fmt::init();
+
 	Game::<App>::default().run()
 }

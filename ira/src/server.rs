@@ -1,15 +1,18 @@
 use std::{
 	collections::BTreeMap,
-	io,
+	fmt, io,
 	net::TcpStream,
 	sync::{
+		atomic::{AtomicU32, Ordering},
 		mpsc::{self, TryRecvError},
-		Arc, RwLock,
+		Arc, Mutex, RwLock,
 	},
 };
 
+use tracing::{debug, info};
+
 use crate::{
-	packet::{self, Packet, TrustedPacket},
+	packet::{self, CreateInstance, Packet, TrustedPacket},
 	App, Context,
 };
 
@@ -21,10 +24,12 @@ struct Server<Message> {
 	packet_tx: mpsc::Sender<TrustedPacket<Message>>,
 
 	clients: Arc<RwLock<BTreeMap<u32, TcpStream>>>,
+	// an up-to-date list of all active instances, indexed by their id
+	instances: Arc<Mutex<BTreeMap<u32, CreateInstance>>>,
 	// represents the owner (client_id) of an instance
 	owners: BTreeMap<u32, u32>,
 
-	next_instance_id: u32,
+	next_instance_id: Arc<AtomicU32>,
 	next_client_id: u32,
 }
 
@@ -35,13 +40,15 @@ where
 	fn new(
 		packet_rx: mpsc::Receiver<Packet<Message>>,
 		packet_tx: mpsc::Sender<TrustedPacket<Message>>,
+		next_instance_id: Arc<AtomicU32>,
 	) -> Self {
 		Self {
 			packet_rx,
 			packet_tx,
 			clients: Arc::new(RwLock::new(BTreeMap::new())),
+			instances: Arc::new(Mutex::new(BTreeMap::new())),
 			owners: BTreeMap::new(),
-			next_instance_id: 0,
+			next_instance_id,
 			next_client_id: 0,
 		}
 	}
@@ -49,20 +56,54 @@ where
 	/// Spawns a new thread to listen for incoming connections.
 	fn run_listener<A: App<Message>>(&self) {
 		let listener = A::listen();
+		let addr = listener.local_addr().unwrap();
+
+		info!(addr = %addr, "listening for incoming connections");
+
 		let clients = Arc::clone(&self.clients);
+		let instances = Arc::clone(&self.instances);
 
 		let mut next_client_id = 0;
 
 		std::thread::spawn(move || loop {
 			// try to get another connecting client
-			if let Ok((stream, _)) = listener.accept() {
-				clients.write().unwrap().insert(next_client_id, stream);
-				next_client_id += 1;
+			let Ok((mut stream, _)) = listener.accept() else {
+				continue;
+			};
+
+			stream.set_nonblocking(true).unwrap();
+
+			// send all current instances to the new client
+			let instances = instances.lock().unwrap();
+
+			// lock for as little time as possible, so just collect immediately
+			let packets = instances
+				.iter()
+				.map(|(id, options)| Packet::<Message>::CreateInstance {
+					id: *id,
+					options: options.clone(),
+				})
+				.collect::<Vec<_>>();
+
+			drop(instances);
+
+			for packet in packets {
+				let packet = packet.into_trusted(0);
+
+				packet.write(&mut stream).unwrap();
 			}
+
+			clients.write().unwrap().insert(next_client_id, stream);
+			next_client_id += 1;
 		});
 	}
 
-	fn broadcast(&self, packet: TrustedPacket<Message>) {
+	fn broadcast(&self, packet: TrustedPacket<Message>)
+	where
+		Message: fmt::Debug,
+	{
+		debug!(packet = ?packet, "sending packet to clients");
+
 		packet
 			.write_iter(self.clients.write().unwrap().values_mut())
 			.unwrap();
@@ -87,24 +128,25 @@ where
 	}
 
 	fn next_instance_id(&mut self) -> u32 {
-		let id = self.next_instance_id;
-		self.next_instance_id += 1;
-		id
+		self.next_instance_id.fetch_add(1, Ordering::SeqCst)
 	}
 
 	/// Runs a dedicated server. This is used when the "server" feature is enabled.
 	///
 	/// Packets received from `packet_rx` are converted into trusted packets, treating
 	/// the local client as an authority.
-	fn run_server(mut self) {
+	fn run_server(mut self)
+	where
+		Message: fmt::Debug,
+	{
 		let client_id = self.next_client_id();
 
 		loop {
 			// first, get a pending packet from the local client
 			match self.packet_rx.try_recv() {
 				Ok(packet) => match packet {
-					Packet::CreateInstance { options, .. } => {
-						let id = self.next_instance_id();
+					Packet::CreateInstance { options, id } => {
+						self.instances.lock().unwrap().insert(id, options.clone());
 
 						self.owners.insert(id, client_id);
 						self.broadcast(
@@ -112,10 +154,19 @@ where
 						);
 					}
 					Packet::DeleteInstance { id } => {
+						self.instances.lock().unwrap().remove(&id);
+
 						self.owners.remove(&id);
 						self.broadcast(Packet::DeleteInstance { id }.into_trusted(client_id));
 					}
 					Packet::UpdateInstance { id, delta } => {
+						self.instances
+							.lock()
+							.unwrap()
+							.get_mut(&id)
+							.unwrap()
+							.apply(&delta);
+
 						self.broadcast(
 							Packet::UpdateInstance { id, delta }.into_trusted(client_id),
 						);
@@ -146,7 +197,7 @@ where
 					Ok(packet) => packet,
 					Err(packet::Error::Io(e)) if e.kind() == io::ErrorKind::WouldBlock => continue,
 					Err(packet::Error::Io(..)) => {
-						eprintln!("Client {} disconnected", client_id);
+						eprintln!("Client {client_id} disconnected");
 						disconnected.push(*client_id);
 						continue;
 					}
@@ -159,11 +210,10 @@ where
 
 				match packet.inner {
 					Packet::CreateInstance { .. } => {
-						let id = self.next_instance_id;
-						self.next_instance_id += 1;
+						let id = self.next_instance_id.fetch_add(1, Ordering::SeqCst);
 
 						self.owners.insert(id, *client_id);
-						self.broadcast(packet);
+						packets.push(packet);
 					}
 					Packet::DeleteInstance { id } => {
 						if self.owners.get(&id) != Some(client_id) {
@@ -197,6 +247,11 @@ where
 			{
 				let mut clients = self.clients.write().unwrap();
 
+				if !disconnected.is_empty() {
+					self.owners
+						.retain(|_, owner| disconnected.binary_search(owner).is_ok());
+				}
+
 				for client_id in disconnected {
 					clients.remove(&client_id);
 				}
@@ -208,8 +263,14 @@ where
 		}
 	}
 
-	fn run_client<A: App>(self) {
+	fn run_client<A: App<Message>>(self)
+	where
+		Message: fmt::Debug,
+	{
 		let mut stream = A::connect();
+		let addr = stream.peer_addr().unwrap();
+
+		info!(addr = %addr, "connected to server");
 
 		loop {
 			// read from local
@@ -218,7 +279,9 @@ where
 			}
 
 			// read from server
-			if let Ok(packet) = TrustedPacket::read(&mut stream) {
+			if let packet = TrustedPacket::read(&mut stream).unwrap() {
+				debug!(packet = ?packet, "received packet from server");
+
 				self.packet_tx.send(packet).unwrap();
 			}
 		}
@@ -234,10 +297,11 @@ impl<Message> Context<Message> {
 pub fn run<A: App<Message>, Message>(
 	packet_tx: mpsc::Sender<TrustedPacket<Message>>,
 	packet_rx: mpsc::Receiver<Packet<Message>>,
+	next_instance_id: Arc<AtomicU32>,
 ) where
-	Message: bitcode::DecodeOwned + bitcode::Encode,
+	Message: bitcode::DecodeOwned + bitcode::Encode + fmt::Debug,
 {
-	let state = Server::new(packet_rx, packet_tx);
+	let state = Server::new(packet_rx, packet_tx, next_instance_id);
 
 	// Listens for new connections
 	#[cfg(feature = "server")]

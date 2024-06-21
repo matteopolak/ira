@@ -10,6 +10,7 @@ use rapier3d::{
 	geometry::{ColliderBuilder, ColliderHandle, ColliderSet, DefaultBroadPhase, NarrowPhase},
 	pipeline::PhysicsPipeline,
 };
+use tracing::debug;
 
 use crate::{
 	game::Context,
@@ -152,7 +153,13 @@ impl<Message> Context<Message> {
 	pub fn physics_update(&mut self) {
 		self.physics.step();
 
-		for body in self.physics.islands.active_dynamic_bodies() {
+		for body in self
+			.physics
+			.islands
+			.active_dynamic_bodies()
+			.iter()
+			.chain(self.physics.islands.active_kinematic_bodies())
+		{
 			let Some(body) = self.physics.rigid_bodies.get(*body) else {
 				continue;
 			};
@@ -256,21 +263,30 @@ impl<Message> Context<Message> {
 		self.packet_tx
 			.send(Packet::CreateInstance {
 				id: 0,
-				options: CreateInstance::from_builder(instance, model_id),
+				options: CreateInstance::from_builder(&instance, model_id),
 			})
 			.unwrap();
 	}
 
 	#[cfg(feature = "server")]
 	pub fn add_instance(&mut self, model_id: u32, instance: InstanceBuilder) -> InstanceHandle {
+		use std::sync::atomic::Ordering;
+
+		let instance_id = self.next_instance_id.fetch_add(1, Ordering::SeqCst);
+
 		self.packet_tx
 			.send(Packet::CreateInstance {
-				id: 0,
+				id: instance_id,
 				options: CreateInstance::from_builder(&instance, model_id),
 			})
 			.unwrap();
 
-		self.add_instance_local(model_id, instance)
+		let handle = self.add_instance_local(model_id, instance);
+
+		self.instances.insert(handle, instance_id);
+		self.handles.insert(instance_id, handle);
+
+		handle
 	}
 
 	/// Adds a new instance to the drum and physics world.

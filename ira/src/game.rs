@@ -7,7 +7,8 @@ use crate::{
 
 use std::{
 	collections::BTreeMap,
-	sync::{mpsc, Arc},
+	fmt,
+	sync::{atomic::AtomicU32, mpsc, Arc},
 	time::{self, Duration},
 };
 
@@ -41,7 +42,7 @@ pub trait App<Message = ()> {
 
 	/// Called when a remote player joins the game. This should return
 	/// the model id, and a builder for the instance.
-	fn create_player() -> (u32, InstanceBuilder);
+	fn create_player(ctx: &mut Context<Message>) -> (u32, InstanceBuilder);
 
 	/// Called when a custom message is received from the server.
 	fn on_message(ctx: &mut Context<Message>, message: Message) {}
@@ -82,7 +83,7 @@ impl<A: App<Message>, Message> Game<A, Message> {
 	/// See [`winit::error::EventLoopError`] for errors.
 	pub fn run(mut self) -> Result<(), winit::error::EventLoopError>
 	where
-		Message: bitcode::Encode + bitcode::DecodeOwned + Send + 'static,
+		Message: bitcode::Encode + bitcode::DecodeOwned + fmt::Debug + Send + 'static,
 	{
 		let event_loop = EventLoop::new()?;
 
@@ -138,12 +139,14 @@ pub struct Context<Message = ()> {
 	/// Used to receive messages from the thread that communicates with the server.
 	/// If the "server" feature is enabled, this will be directly from the server.
 	pub(crate) packet_rx: mpsc::Receiver<TrustedPacket<Message>>,
+
+	pub(crate) next_instance_id: Arc<AtomicU32>,
 }
 
 impl<Message> Context<Message> {
 	async fn new<A: App<Message>>(window: Window, drum: Drum) -> Self
 	where
-		Message: bitcode::Encode + bitcode::DecodeOwned + Send + 'static,
+		Message: bitcode::Encode + bitcode::DecodeOwned + fmt::Debug + Send + 'static,
 	{
 		let window = Arc::new(window);
 		let size = window.inner_size();
@@ -220,8 +223,14 @@ impl<Message> Context<Message> {
 		let (server_packet_tx, packet_rx) = mpsc::channel();
 		let (packet_tx, server_packet_rx) = mpsc::channel();
 
-		std::thread::spawn(move || {
-			server::run::<A, _>(server_packet_tx, server_packet_rx);
+		let next_instance_id = Arc::new(AtomicU32::new(0));
+
+		std::thread::spawn({
+			let next_instance_id = Arc::clone(&next_instance_id);
+
+			move || {
+				server::run::<A, _>(server_packet_tx, server_packet_rx, next_instance_id);
+			}
 		});
 
 		Self {
@@ -261,6 +270,8 @@ impl<Message> Context<Message> {
 
 			packet_tx,
 			packet_rx,
+
+			next_instance_id,
 		}
 	}
 
@@ -416,7 +427,7 @@ impl<A: App<Message>, Message> Game<A, Message> {
 		match packet.inner {
 			Packet::Custom(message) => A::on_message(ctx, message),
 			Packet::CreateClient { instance_id } => {
-				let (model_id, instance) = A::create_player();
+				let (model_id, instance) = A::create_player(ctx);
 				let instance = ctx.add_instance_local(model_id, instance);
 
 				ctx.handles.insert(instance_id, instance);
@@ -506,7 +517,7 @@ impl<A: App<Message>, Message> Game<A, Message> {
 
 impl<A: App<Message>, Message> ApplicationHandler for Game<A, Message>
 where
-	Message: bitcode::Encode + bitcode::DecodeOwned + Send + 'static,
+	Message: bitcode::Encode + bitcode::DecodeOwned + fmt::Debug + Send + 'static,
 {
 	fn resumed(&mut self, event_loop: &ActiveEventLoop) {
 		let window = event_loop

@@ -4,7 +4,6 @@ use bytemuck::{Pod, Zeroable};
 use glam::{Mat4, Quat, Vec3};
 use ira_drum::Handle;
 use rapier3d::{
-	data::Index,
 	dynamics::{RigidBody, RigidBodyBuilder, RigidBodyHandle},
 	geometry::{ColliderBuilder, ColliderHandle},
 };

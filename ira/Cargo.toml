@@ -20,6 +20,7 @@ log = "0.4"
 nalgebra = { version = "0.32", features = ["convert-glam027"] }
 pollster = "0.3"
 rapier3d = "0.20"
+tracing = "0.1"
 wgpu = "0.20"
 winit = "0.30"
 

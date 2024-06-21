@@ -1,4 +1,7 @@
-use std::io::{self, Write};
+use std::{
+	fmt,
+	io::{self, Write},
+};
 
 use glam::{Quat, Vec3};
 use rapier3d::{dynamics::RigidBodyBuilder, geometry::ColliderBuilder};
@@ -6,6 +9,7 @@ use rapier3d::{dynamics::RigidBodyBuilder, geometry::ColliderBuilder};
 use crate::{physics::PhysicsState, Body, Instance, InstanceBuilder};
 
 // TODO: implement Display and Error
+#[derive(Debug)]
 pub enum Error {
 	Io(io::Error),
 	Bitcode(bitcode::Error),
@@ -148,7 +152,7 @@ impl<Message> TrustedPacket<Message> {
 }
 
 /// A packet for creating a new collider.
-#[derive(Debug, bitcode::Encode, bitcode::Decode)]
+#[derive(Debug, Clone, bitcode::Encode, bitcode::Decode)]
 pub enum CreateCollider {
 	Cuboid {
 		half_extents: Vec3,
@@ -172,6 +176,7 @@ pub enum CreateCollider {
 }
 
 impl CreateCollider {
+	#[must_use]
 	pub fn from_builder(builder: &ColliderBuilder) -> Self {
 		let ball = builder.shape.as_ball();
 
@@ -221,7 +226,7 @@ impl CreateCollider {
 	}
 }
 
-#[derive(Debug, bitcode::Encode, bitcode::Decode)]
+#[derive(Debug, Clone, bitcode::Encode, bitcode::Decode)]
 pub enum CreateBody {
 	Static,
 	Rigid {
@@ -232,7 +237,7 @@ pub enum CreateBody {
 }
 
 /// A packet for creating a new instance.
-#[derive(Debug, bitcode::Encode, bitcode::Decode)]
+#[derive(Debug, Clone, bitcode::Encode, bitcode::Decode)]
 pub struct CreateInstance {
 	pub model_id: u32,
 	pub position: Vec3,
@@ -242,7 +247,7 @@ pub struct CreateInstance {
 	pub collider: Option<CreateCollider>,
 }
 
-#[derive(Debug, bitcode::Encode, bitcode::Decode)]
+#[derive(Debug, Clone, bitcode::Encode, bitcode::Decode)]
 pub enum RigidBodyType {
 	Dynamic = 0,
 	Fixed = 1,
@@ -277,6 +282,38 @@ impl From<rapier3d::dynamics::RigidBodyType> for RigidBodyType {
 }
 
 impl CreateInstance {
+	pub fn apply(&mut self, delta: &UpdateInstance) {
+		self.position = delta.position;
+		self.rotation = delta.rotation;
+
+		if let Some(scale) = delta.scale {
+			self.scale = scale;
+		}
+
+		if let Some(body) = &delta.body {
+			match (&mut self.body, body) {
+				(CreateBody::Static, UpdateBody::Static { .. }) => {
+					self.body = CreateBody::Static;
+				}
+				(
+					CreateBody::Rigid {
+						velocity,
+						angular_velocity,
+						..
+					},
+					UpdateBody::Rigid {
+						velocity: new_velocity,
+						angular_velocity: new_angular_velocity,
+					},
+				) => {
+					*velocity = *new_velocity;
+					*angular_velocity = *new_angular_velocity;
+				}
+				_ => todo!(),
+			}
+		}
+	}
+
 	pub fn into_builder(self) -> InstanceBuilder {
 		let instance = Instance::builder()
 			.position(self.position)
