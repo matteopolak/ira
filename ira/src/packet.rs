@@ -3,7 +3,12 @@ use std::io::{self, Write};
 use glam::{Quat, Vec3};
 use rapier3d::{dynamics::RigidBodyBuilder, geometry::ColliderBuilder};
 
-use crate::{physics::PhysicsState, Body, Instance, InstanceBuilder};
+use crate::{
+	client::{Client, ClientId},
+	physics::PhysicsState,
+	server::InstanceId,
+	Body, Instance, InstanceBuilder,
+};
 
 // TODO: implement Display and Error
 #[derive(Debug)]
@@ -27,16 +32,22 @@ impl From<bitcode::Error> for Error {
 #[derive(Debug, bitcode::Encode, bitcode::Decode)]
 pub enum Packet<Message> {
 	/// An instance has been created.
-	CreateInstance { options: CreateInstance, id: u32 },
+	CreateInstance {
+		options: CreateInstance,
+		id: InstanceId,
+	},
 	/// An instance has been deleted.
-	DeleteInstance { id: u32 },
+	DeleteInstance { id: InstanceId },
 	/// An instance has been updated.
-	UpdateInstance { id: u32, delta: UpdateInstance },
+	UpdateInstance {
+		id: InstanceId,
+		delta: UpdateInstance,
+	},
 	/// A new client has connected.
-	CreateClient { instance_id: u32 },
+	CreateClient { instance_id: InstanceId },
 	/// The first packet sent to a client, containing its own client id as the receiver
 	/// of the wrapped [`TrustedPacket`], and its own instance id.
-	Connected { instance_id: u32 },
+	Connected { instance_id: InstanceId },
 	/// A client has disconnected.
 	DeleteClient,
 	/// A custom message (application-defined)
@@ -48,7 +59,7 @@ impl<Message> Packet<Message> {
 		Self::Custom(message)
 	}
 
-	pub fn into_trusted(self, client_id: u32) -> TrustedPacket<Message> {
+	pub fn into_trusted(self, client_id: ClientId) -> TrustedPacket<Message> {
 		TrustedPacket {
 			client_id,
 			inner: self,
@@ -117,7 +128,7 @@ impl<Message> Packet<Message> {
 // packet with client id
 #[derive(Debug, bitcode::Encode, bitcode::Decode)]
 pub struct TrustedPacket<Message> {
-	pub client_id: u32,
+	pub client_id: ClientId,
 	pub inner: Packet<Message>,
 }
 
@@ -146,10 +157,7 @@ impl<Message> TrustedPacket<Message> {
 	/// # Errors
 	///
 	/// See [`bitcode::Error`] and [`io::Error`] for more information.
-	pub fn write_iter<'w, W: Write + 'w>(
-		&self,
-		writer: impl IntoIterator<Item = &'w mut W>,
-	) -> io::Result<()>
+	pub fn write_iter<'w>(&self, writer: impl IntoIterator<Item = &'w mut Client>) -> io::Result<()>
 	where
 		Message: bitcode::Encode,
 	{
@@ -169,7 +177,7 @@ impl<Message> TrustedPacket<Message> {
 	/// # Errors
 	///
 	/// See [`bitcode::Error`] and [`io::Error`] for more information.
-	pub fn write<W: Write>(&self, writer: &mut W) -> io::Result<()>
+	pub fn write(&self, writer: &mut Client) -> io::Result<()>
 	where
 		Message: bitcode::Encode,
 	{

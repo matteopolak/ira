@@ -8,6 +8,7 @@
 #![allow(clippy::default_trait_access)]
 
 pub mod camera;
+pub mod client;
 pub mod drum;
 pub mod extra;
 pub mod game;

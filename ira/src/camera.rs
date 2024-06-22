@@ -2,6 +2,7 @@ use bytemuck::{Pod, Zeroable};
 use glam::{Mat4, Vec3};
 use wgpu::util::DeviceExt;
 
+#[derive(Debug)]
 pub struct Projection {
 	pub aspect: f32,
 	pub fovy: f32,
@@ -20,6 +21,7 @@ impl Projection {
 	}
 }
 
+#[derive(Debug)]
 pub struct Settings {
 	pub position: Vec3,
 	pub yaw: f32,
@@ -127,6 +129,7 @@ impl CameraUniform {
 }
 
 #[must_use]
+#[derive(Debug)]
 pub struct GpuCamera {
 	pub(crate) uniform: CameraUniform,
 
@@ -155,17 +158,20 @@ impl GpuCamera {
 	}
 }
 
+#[derive(Debug)]
 pub struct Camera {
 	pub gpu: GpuCamera,
 	pub settings: Settings,
 }
 
 impl Camera {
+	/// Create a new camera with the given GPU camera and settings.
 	#[must_use]
 	pub fn new(gpu: GpuCamera, settings: Settings) -> Self {
 		Self { gpu, settings }
 	}
 
+	/// Update the camera's view and projection matrices.
 	pub fn update_view_proj(&mut self, queue: &wgpu::Queue) {
 		self.gpu.update(
 			queue,
@@ -174,6 +180,7 @@ impl Camera {
 		);
 	}
 
+	/// Apply a new position, yaw, and pitch to the camera.
 	pub fn apply(&mut self, position: Vec3, yaw: f32, pitch: f32) {
 		self.settings.position = position;
 		self.settings.yaw = yaw;

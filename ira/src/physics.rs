@@ -1,4 +1,4 @@
-use std::ops;
+use std::{ops, sync::atomic::Ordering};
 
 use glam::Vec3;
 use rapier3d::{
@@ -14,6 +14,7 @@ use rapier3d::{
 use crate::{
 	game::Context,
 	packet::{CreateInstance, Packet, UpdateInstance},
+	server::InstanceId,
 	Body, GpuDrum, GpuInstance, GpuModel, Instance, InstanceBuilder,
 };
 
@@ -239,8 +240,8 @@ impl<Message> Context<Message> {
 		self.physics.colliders.insert(collider.build())
 	}
 
-	pub fn remove_instance_local(&mut self, instance_id: u32) -> Option<Instance> {
-		let instance = self.handles.remove(&instance_id)?;
+	pub fn remove_instance_local(&mut self, id: InstanceId) -> Option<Instance> {
+		let instance = self.handles.remove(&id)?;
 
 		self.instances.remove(&instance);
 
@@ -274,9 +275,7 @@ impl<Message> Context<Message> {
 
 	#[cfg(feature = "server")]
 	pub fn add_instance(&mut self, model_id: u32, instance: InstanceBuilder) -> InstanceHandle {
-		use std::sync::atomic::Ordering;
-
-		let instance_id = self.next_instance_id.fetch_add(1, Ordering::SeqCst);
+		let instance_id = InstanceId::new(self.next_instance_id.fetch_add(1, Ordering::SeqCst));
 
 		let _ = self.packet_tx.send(Packet::CreateInstance {
 			id: instance_id,

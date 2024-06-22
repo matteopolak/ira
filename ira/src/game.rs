@@ -1,8 +1,12 @@
 use crate::{
-	camera, light,
+	camera,
+	client::ClientId,
+	light,
 	packet::{CreateInstance, Packet, TrustedPacket},
 	physics::{InstanceHandle, PhysicsState},
-	render, server, Camera, DrumExt, GpuDrum, GpuTexture, InstanceBuilder, MaterialExt,
+	render,
+	server::{self, InstanceId},
+	Camera, DrumExt, GpuDrum, GpuTexture, InstanceBuilder, MaterialExt,
 };
 
 use std::{
@@ -126,12 +130,9 @@ pub struct Context<Message = ()> {
 	pub(crate) just_pressed: Vec<KeyCode>,
 	pub(crate) mouse_delta: Vec2,
 
-	// instance_id -> instance
-	pub(crate) handles: BTreeMap<u32, InstanceHandle>,
-	// instance -> instance_id
-	pub(crate) instances: BTreeMap<InstanceHandle, u32>,
-	// client_id -> instance_id
-	pub(crate) clients: BTreeMap<u32, u32>,
+	pub(crate) handles: BTreeMap<InstanceId, InstanceHandle>,
+	pub(crate) instances: BTreeMap<InstanceHandle, InstanceId>,
+	pub(crate) clients: BTreeMap<ClientId, InstanceId>,
 
 	/// Used to send messages to the thread that communicates with the server.
 	/// If the "server" feature is enabled, this will be directly to the server.
@@ -141,8 +142,8 @@ pub struct Context<Message = ()> {
 	pub(crate) packet_rx: mpsc::Receiver<TrustedPacket<Message>>,
 
 	pub(crate) next_instance_id: Arc<AtomicU32>,
-	pub client_id: Option<u32>,
-	pub instance_id: Option<u32>,
+	pub client_id: Option<ClientId>,
+	pub instance_id: Option<InstanceId>,
 }
 
 impl<Message> Context<Message> {
