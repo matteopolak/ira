@@ -1,13 +1,15 @@
+pub mod model;
+pub mod texture;
+
 use std::sync::Arc;
 
 use glam::Vec3;
 use ira_drum::{Drum, Material, Vertex};
+use model::VertexExt;
+use texture::GpuTexture;
 use winit::window::Window;
 
-use crate::{
-	camera, light, Camera, CameraUniform, DrumExt, GpuDrum, GpuTexture, Instance, MaterialExt,
-	VertexExt,
-};
+use crate::{camera, light, Camera, CameraUniform, DrumExt, GpuDrum, Instance, MaterialExt};
 
 pub struct RenderState {
 	pub window: Arc<Window>,

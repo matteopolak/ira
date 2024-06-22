@@ -1,18 +1,25 @@
-use ira_drum::Handle;
+use ira_drum::{Handle, Texture};
+#[cfg(feature = "client")]
 use wgpu::util::DeviceExt;
 
-use crate::{GpuDrum, GpuTexture};
+use crate::GpuDrum;
+
+#[cfg(feature = "client")]
+use crate::render::texture::{GpuTexture, TextureExt};
 
 #[derive(Debug)]
 pub struct GpuMesh {
-	pub vertex_buffer: wgpu::Buffer,
-	pub index_buffer: wgpu::Buffer,
-	pub material: Handle<GpuMaterial>,
-
 	pub num_indices: u32,
 	/// The bounding box of the mesh.
 	pub min: glam::Vec3,
 	pub max: glam::Vec3,
+
+	#[cfg(feature = "client")]
+	pub vertex_buffer: wgpu::Buffer,
+	#[cfg(feature = "client")]
+	pub index_buffer: wgpu::Buffer,
+	#[cfg(feature = "client")]
+	pub material: Handle<GpuMaterial>,
 }
 
 #[derive(Debug)]
@@ -21,6 +28,7 @@ pub struct GpuMeshes {
 	pub transparent: Box<[GpuMesh]>,
 }
 
+#[cfg(feature = "client")]
 #[derive(Debug)]
 pub struct GpuMaterial {
 	pub albedo: Handle<GpuTexture>,
@@ -32,6 +40,7 @@ pub struct GpuMaterial {
 	pub bind_group: wgpu::BindGroup,
 }
 
+#[cfg(feature = "client")]
 pub trait MaterialExt {
 	fn into_gpu(
 		self,
@@ -43,6 +52,7 @@ pub trait MaterialExt {
 	fn create_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout;
 }
 
+#[cfg(feature = "client")]
 impl MaterialExt for ira_drum::Material {
 	#[must_use]
 	fn create_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
@@ -150,16 +160,16 @@ impl MaterialExt for ira_drum::Material {
 			entries: &[
 				// albedo
 				albedo.view_layout(0),
-				albedo.sampler_layout(1),
+				Texture::sampler_layout(1),
 				// normal
 				normal.view_layout(2),
-				normal.sampler_layout(3),
+				Texture::sampler_layout(3),
 				// ao + roughness + metallic
 				orm.view_layout(4),
-				orm.sampler_layout(5),
+				Texture::sampler_layout(5),
 				// emissive
 				emissive.view_layout(6),
-				emissive.sampler_layout(7),
+				Texture::sampler_layout(7),
 			],
 			label: None,
 		});
@@ -216,16 +226,19 @@ impl MaterialExt for ira_drum::Material {
 }
 
 pub trait MeshExt {
-	fn to_gpu(&self, device: &wgpu::Device) -> GpuMesh;
+	fn to_gpu(&self, #[cfg(feature = "client")] device: &wgpu::Device) -> GpuMesh;
 }
 
 impl MeshExt for ira_drum::Mesh {
-	fn to_gpu(&self, device: &wgpu::Device) -> GpuMesh {
+	fn to_gpu(&self, #[cfg(feature = "client")] device: &wgpu::Device) -> GpuMesh {
+		#[cfg(feature = "client")]
 		let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
 			label: None,
 			contents: bytemuck::cast_slice(&self.vertices),
 			usage: wgpu::BufferUsages::VERTEX,
 		});
+
+		#[cfg(feature = "client")]
 		let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
 			label: None,
 			contents: bytemuck::cast_slice(&self.indices),
@@ -233,12 +246,15 @@ impl MeshExt for ira_drum::Mesh {
 		});
 
 		GpuMesh {
-			vertex_buffer,
-			index_buffer,
-			num_indices: self.indices.len() as u32,
-			material: Handle::new(self.material.raw()),
 			min: self.min.into(),
 			max: self.max.into(),
+			num_indices: self.indices.len() as u32,
+			#[cfg(feature = "client")]
+			vertex_buffer,
+			#[cfg(feature = "client")]
+			index_buffer,
+			#[cfg(feature = "client")]
+			material: Handle::new(self.material.raw()),
 		}
 	}
 }

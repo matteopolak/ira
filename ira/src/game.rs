@@ -2,10 +2,12 @@ use crate::{
 	client::ClientId,
 	packet::{CreateInstance, Packet, TrustedPacket},
 	physics::{InstanceHandle, PhysicsState},
-	render::RenderState,
 	server::{self, InstanceId},
 	DrumExt, GpuDrum, Instance, InstanceBuilder,
 };
+
+#[cfg(feature = "client")]
+use crate::render::RenderState;
 
 use std::{
 	collections::BTreeMap,
@@ -17,8 +19,10 @@ use std::{
 use glam::Vec2;
 use ira_drum::Drum;
 use rapier3d::data::Arena;
+#[cfg(feature = "client")]
 use winit::{
 	application::ApplicationHandler,
+	error::EventLoopError,
 	event::{DeviceEvent, KeyEvent, WindowEvent},
 	event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
 	keyboard::{KeyCode, PhysicalKey},
@@ -70,6 +74,20 @@ pub struct Game<A, Message = ()> {
 	state: Option<(Context<Message>, A)>,
 }
 
+#[derive(Debug)]
+pub enum Error {
+	/// An error occurred while running the event loop.
+	#[cfg(feature = "client")]
+	EventLoop(EventLoopError),
+}
+
+#[cfg(feature = "client")]
+impl From<EventLoopError> for Error {
+	fn from(e: EventLoopError) -> Self {
+		Self::EventLoop(e)
+	}
+}
+
 impl<A, Message> Default for Game<A, Message> {
 	fn default() -> Self {
 		Self { state: None }
@@ -84,14 +102,38 @@ impl<A: App<Message>, Message> Game<A, Message> {
 	/// # Errors
 	///
 	/// See [`winit::error::EventLoopError`] for errors.
-	pub fn run(mut self) -> Result<(), winit::error::EventLoopError>
+	#[cfg(feature = "client")]
+	pub fn run(mut self) -> Result<(), Error>
 	where
 		Message: bitcode::Encode + bitcode::DecodeOwned + fmt::Debug + Send + 'static,
 	{
 		let event_loop = EventLoop::new()?;
 
 		event_loop.set_control_flow(ControlFlow::Poll);
-		event_loop.run_app(&mut self)
+		event_loop.run_app(&mut self)?;
+
+		Ok(())
+	}
+
+	/// Runs the application.
+	///
+	/// This function will block the current thread until the application is closed.
+	///
+	/// # Errors
+	///
+	/// See [`Error`] for errors.
+	#[cfg(not(feature = "client"))]
+	pub fn run(self) -> Result<(), Error>
+	where
+		Message: bitcode::Encode + bitcode::DecodeOwned + fmt::Debug + Send + 'static,
+	{
+		let drum = A::on_init();
+		let mut ctx = pollster::block_on(Context::<Message>::new::<A>(drum));
+		let mut app = A::on_ready(&mut ctx);
+
+		loop {
+			ctx.render(&mut app);
+		}
 	}
 }
 
@@ -104,8 +146,11 @@ pub struct Context<Message = ()> {
 
 	pub(crate) desired_fps: f32,
 
+	#[cfg(feature = "client")]
 	pub(crate) pressed_keys: Vec<KeyCode>,
+	#[cfg(feature = "client")]
 	pub(crate) just_pressed: Vec<KeyCode>,
+	#[cfg(feature = "client")]
 	pub(crate) mouse_delta: Vec2,
 
 	pub(crate) handles: BTreeMap<InstanceId, InstanceHandle>,
@@ -132,7 +177,7 @@ pub struct Context<Message = ()> {
 
 impl<Message> Context<Message> {
 	#[allow(clippy::too_many_lines)]
-	async fn new<A: App<Message>>(window: Window, drum: Drum) -> Self
+	async fn new<A: App<Message>>(#[cfg(feature = "client")] window: Window, drum: Drum) -> Self
 	where
 		Message: bitcode::Encode + bitcode::DecodeOwned + fmt::Debug + Send + 'static,
 	{
@@ -162,8 +207,11 @@ impl<Message> Context<Message> {
 
 			desired_fps: 120.0,
 
+			#[cfg(feature = "client")]
 			pressed_keys: Vec::new(),
+			#[cfg(feature = "client")]
 			just_pressed: Vec::new(),
+			#[cfg(feature = "client")]
 			mouse_delta: Vec2::ZERO,
 
 			handles: BTreeMap::new(),
@@ -195,21 +243,24 @@ impl<Message> Context<Message> {
 		ctx
 	}
 
+	#[cfg(feature = "client")]
 	pub fn pressed(&self, key: KeyCode) -> bool {
 		self.pressed_keys.contains(&key)
 	}
 
+	#[cfg(feature = "client")]
 	pub fn just_pressed(&self, key: KeyCode) -> bool {
 		self.just_pressed.contains(&key)
 	}
 
+	#[cfg(feature = "client")]
 	pub fn mouse_delta(&self) -> Vec2 {
 		self.mouse_delta
 	}
 }
 
-impl<A: App<Message>, Message> Game<A, Message> {
-	fn on_packet(ctx: &mut Context<Message>, packet: TrustedPacket<Message>) {
+impl<Message> Context<Message> {
+	fn on_packet<A: App<Message>>(ctx: &mut Context<Message>, packet: TrustedPacket<Message>) {
 		let client_id = packet.client_id;
 
 		match packet.inner {
@@ -262,60 +313,58 @@ impl<A: App<Message>, Message> Game<A, Message> {
 		}
 	}
 
-	fn render(&mut self, event_loop: &ActiveEventLoop) {
-		let Some((ctx, app)) = self.state.as_mut() else {
-			return;
-		};
-
-		while let Ok(packet) = ctx.packet_rx.try_recv() {
-			Self::on_packet(ctx, packet);
+	fn render<A: App<Message>>(
+		&mut self,
+		app: &mut A,
+		#[cfg(feature = "client")] event_loop: &ActiveEventLoop,
+	) {
+		while let Ok(packet) = self.packet_rx.try_recv() {
+			Self::on_packet::<A>(self, packet);
 		}
 
-		let delta = ctx.last_physics.elapsed();
+		let delta = self.last_physics.elapsed();
 
 		// physics 60fps
 		if delta.as_secs_f32() >= 1.0 / 60.0 {
-			ctx.last_physics = time::Instant::now();
-			ctx.physics_update();
-			app.on_fixed_update(ctx);
+			self.last_physics = time::Instant::now();
+			self.physics_update();
+			app.on_fixed_update(self);
 		}
 
 		#[cfg(feature = "client")]
 		{
-			let delta = ctx.last_frame.elapsed();
+			let delta = self.last_frame.elapsed();
 
-			if delta.as_secs_f32() < 1.0 / ctx.desired_fps {
+			if delta.as_secs_f32() < 1.0 / self.desired_fps {
 				return;
 			}
 
-			ctx.last_frame = time::Instant::now();
+			self.last_frame = time::Instant::now();
 
-			app.on_update(ctx, delta);
+			app.on_update(self, delta);
 			#[cfg(feature = "client")]
-			ctx.render.camera.update_view_proj(&ctx.render.queue);
+			self.render.camera.update_view_proj(&self.render.queue);
 
-			ctx.just_pressed.clear();
-			ctx.mouse_delta = Vec2::ZERO;
+			self.just_pressed.clear();
+			self.mouse_delta = Vec2::ZERO;
 
-			#[cfg(feature = "client")]
-			{
-				for model in &mut ctx.drum.models {
-					model.update_instance_buffer(&ctx.render.device, &ctx.render.queue);
+			for model in &mut self.drum.models {
+				model.update_instance_buffer(&self.render.device, &self.render.queue);
+			}
+
+			match self.render.render_frame(&self.drum) {
+				Ok(..) => {}
+				Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
+					self.render.resize(self.render.window.inner_size());
 				}
-
-				match ctx.render.render_frame(&ctx.drum) {
-					Ok(..) => {}
-					Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
-						ctx.render.resize(ctx.render.window.inner_size());
-					}
-					Err(wgpu::SurfaceError::OutOfMemory) => event_loop.exit(),
-					Err(wgpu::SurfaceError::Timeout) => log::warn!("surface timeout"),
-				}
+				Err(wgpu::SurfaceError::OutOfMemory) => event_loop.exit(),
+				Err(wgpu::SurfaceError::Timeout) => log::warn!("surface timeout"),
 			}
 		}
 	}
 }
 
+#[cfg(feature = "client")]
 impl<A: App<Message>, Message> ApplicationHandler for Game<A, Message>
 where
 	Message: bitcode::Encode + bitcode::DecodeOwned + fmt::Debug + Send + 'static,
@@ -356,7 +405,11 @@ where
 	}
 
 	fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
-		self.render(event_loop);
+		let Some((ctx, app)) = self.state.as_mut() else {
+			return;
+		};
+
+		ctx.render(app, event_loop);
 	}
 
 	fn window_event(
@@ -365,7 +418,7 @@ where
 		window_id: WindowId,
 		event: WindowEvent,
 	) {
-		let Some((ctx, _)) = self.state.as_mut() else {
+		let Some((ctx, app)) = self.state.as_mut() else {
 			return;
 		};
 
@@ -378,7 +431,7 @@ where
 				ctx.render.resize(size);
 			}
 			WindowEvent::RedrawRequested => {
-				self.render(event_loop);
+				ctx.render(app, event_loop);
 			}
 			WindowEvent::CloseRequested => {
 				event_loop.exit();

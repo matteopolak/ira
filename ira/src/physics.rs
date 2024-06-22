@@ -15,8 +15,11 @@ use crate::{
 	game::Context,
 	packet::{CreateInstance, Packet, UpdateInstance},
 	server::InstanceId,
-	Body, GpuDrum, GpuInstance, GpuModel, Instance, InstanceBuilder,
+	Body, GpuDrum, GpuModel, Instance, InstanceBuilder,
 };
+
+#[cfg(feature = "client")]
+use crate::render::model::GpuInstance;
 
 #[derive(Debug, Clone, Copy)]
 pub struct BoundingBox {
@@ -177,13 +180,13 @@ impl<Message> Context<Message> {
 
 			#[cfg(feature = "client")]
 			{
-				instance
-					.resolve_model_mut(&mut self.drum, &self.instances)
-					.dirty = true;
+				if let Some(model) = instance.resolve_model_mut(&mut self.drum, &self.instances) {
+					model.dirty = true;
+				}
 
-				let (gpu, instance) = instance.resolve_mut(&mut self.drum, &mut self.instances);
-
-				*gpu = instance.to_gpu(&self.physics);
+				if let Some(mut pair) = instance.resolve_mut(&mut self.drum, &mut self.instances) {
+					pair.update_gpu(&self.physics);
+				}
 			}
 
 			#[cfg(feature = "server")]
@@ -290,12 +293,10 @@ impl<Message> Context<Message> {
 
 	#[cfg(not(feature = "server"))]
 	pub fn add_instance(&mut self, model_id: u32, instance: InstanceBuilder) {
-		self.packet_tx
-			.send(Packet::CreateInstance {
-				id: 0,
-				options: CreateInstance::from_builder(&instance, model_id),
-			})
-			.unwrap();
+		let _ = self.packet_tx.send(Packet::CreateInstance {
+			id: InstanceId::NONE,
+			options: CreateInstance::from_builder(&instance, model_id),
+		});
 	}
 
 	#[cfg(feature = "server")]
@@ -329,7 +330,8 @@ impl<Message> Context<Message> {
 		mut instance: InstanceBuilder,
 	) -> InstanceHandle {
 		let model = &mut self.drum.models[model_id as usize];
-		let instance_id = model.instances.len() as u32;
+		let instance_id = model.handles.len() as u32;
+
 		let index = self.instances.insert_with(|handle| {
 			let (axis, angle) = instance.rotation.to_axis_angle();
 
@@ -366,7 +368,7 @@ impl<Message> Context<Message> {
 
 			let instance = self.physics.add_instance(instance, model_id, instance_id);
 
-			model.instances.push(instance.to_gpu(&self.physics));
+			model.add_gpu_instance(&instance, &self.physics);
 
 			instance
 		});
@@ -380,6 +382,40 @@ pub struct InstanceHandle {
 	handle: Index,
 }
 
+pub struct InstancePair<'d> {
+	#[cfg(feature = "client")]
+	pub gpu: &'d GpuInstance,
+	pub instance: &'d Instance,
+}
+
+pub struct InstancePairMut<'d> {
+	pub instance: &'d mut Instance,
+
+	#[cfg(feature = "client")]
+	pub gpu: &'d mut GpuInstance,
+	#[cfg(feature = "client")]
+	dirty: &'d mut bool,
+}
+
+impl InstancePairMut<'_> {
+	pub fn update<F>(&mut self, physics: &mut PhysicsState, update: F)
+	where
+		F: FnOnce(&mut Instance, &mut PhysicsState),
+	{
+		update(self.instance, physics);
+
+		self.update_gpu(physics);
+	}
+
+	pub fn update_gpu(&mut self, physics: &PhysicsState) {
+		#[cfg(feature = "client")]
+		{
+			*self.gpu = self.instance.to_gpu(physics);
+			*self.dirty = true;
+		}
+	}
+}
+
 impl InstanceHandle {
 	#[must_use]
 	pub fn new(handle: Index) -> Self {
@@ -391,17 +427,21 @@ impl InstanceHandle {
 	/// # Panics
 	///
 	/// Panics if the handle is invalid.
+	#[must_use]
 	pub fn resolve<'d>(
 		&self,
 		drum: &'d GpuDrum,
 		instances: &'d Arena<Instance>,
-	) -> (&'d GpuInstance, &'d Instance) {
-		let instance = instances.get(self.handle).unwrap();
+	) -> Option<InstancePair<'d>> {
+		let instance = instances.get(self.handle)?;
+		#[cfg(feature = "client")]
+		let model = drum.models.get(instance.model_id as usize)?;
 
-		(
-			&drum.models[instance.model_id as usize].instances[instance.instance_id as usize],
+		Some(InstancePair {
+			#[cfg(feature = "client")]
+			gpu: model.instances.get(instance.instance_id as usize)?,
 			instance,
-		)
+		})
 	}
 
 	/// Returns the instance associated with the handle.
@@ -413,13 +453,18 @@ impl InstanceHandle {
 		&self,
 		drum: &'d mut GpuDrum,
 		instances: &'d mut Arena<Instance>,
-	) -> (&'d mut GpuInstance, &'d mut Instance) {
-		let instance = instances.get_mut(self.handle).unwrap();
+	) -> Option<InstancePairMut<'d>> {
+		let instance = instances.get_mut(self.handle)?;
+		#[cfg(feature = "client")]
+		let model = drum.models.get_mut(instance.model_id as usize)?;
 
-		(
-			&mut drum.models[instance.model_id as usize].instances[instance.instance_id as usize],
+		Some(InstancePairMut {
+			#[cfg(feature = "client")]
+			gpu: model.instances.get_mut(instance.instance_id as usize)?,
+			#[cfg(feature = "client")]
+			dirty: &mut model.dirty,
 			instance,
-		)
+		})
 	}
 
 	/// Returns the model associated with the instance.
@@ -431,11 +476,11 @@ impl InstanceHandle {
 	pub fn resolve_model<'d>(
 		&self,
 		drum: &'d GpuDrum,
-		instances: &'d Arena<Instance>,
-	) -> &'d GpuModel {
-		let instance = instances.get(self.handle).unwrap();
+		instances: &Arena<Instance>,
+	) -> Option<&'d GpuModel> {
+		let instance = instances.get(self.handle)?;
 
-		&drum.models[instance.model_id as usize]
+		drum.models.get(instance.model_id as usize)
 	}
 
 	/// Returns the model associated with the instance.
@@ -446,11 +491,11 @@ impl InstanceHandle {
 	pub fn resolve_model_mut<'d>(
 		&self,
 		drum: &'d mut GpuDrum,
-		instances: &'d Arena<Instance>,
-	) -> &'d mut GpuModel {
-		let instance = instances.get(self.handle).unwrap();
+		instances: &Arena<Instance>,
+	) -> Option<&'d mut GpuModel> {
+		let instance = instances.get(self.handle)?;
 
-		&mut drum.models[instance.model_id as usize]
+		drum.models.get_mut(instance.model_id as usize)
 	}
 
 	/// Updates the instance with the provided closure.
@@ -468,17 +513,11 @@ impl InstanceHandle {
 	where
 		F: FnOnce(&mut Instance, &mut PhysicsState),
 	{
-		let (gpu, instance) = self.resolve_mut(&mut ctx.drum, &mut ctx.instances);
-		let model_id = instance.model_id as usize;
+		let Some(mut pair) = self.resolve_mut(&mut ctx.drum, &mut ctx.instances) else {
+			return;
+		};
 
-		update(instance, &mut ctx.physics);
-
-		#[cfg(feature = "client")]
-		{
-			*gpu = instance.to_gpu(&ctx.physics);
-
-			ctx.drum.models[model_id].dirty = true;
-		}
+		pair.update(&mut ctx.physics, update);
 	}
 }
 

@@ -6,7 +6,7 @@ pub trait TextureExt {
 
 	fn view_dimension(&self) -> wgpu::TextureViewDimension;
 	fn view_layout(&self, binding: u32) -> wgpu::BindGroupLayoutEntry;
-	fn sampler_layout(&self, binding: u32) -> wgpu::BindGroupLayoutEntry;
+	fn sampler_layout(binding: u32) -> wgpu::BindGroupLayoutEntry;
 }
 
 impl TextureExt for ira_drum::Texture {
@@ -77,7 +77,7 @@ impl TextureExt for ira_drum::Texture {
 		}
 	}
 
-	fn sampler_layout(&self, binding: u32) -> wgpu::BindGroupLayoutEntry {
+	fn sampler_layout(binding: u32) -> wgpu::BindGroupLayoutEntry {
 		wgpu::BindGroupLayoutEntry {
 			binding,
 			visibility: wgpu::ShaderStages::FRAGMENT,
@@ -273,16 +273,6 @@ impl GpuTexture {
 				multisampled: false,
 				view_dimension: self.view_dimension,
 			},
-			count: None,
-		}
-	}
-
-	#[must_use]
-	pub fn sampler_layout(&self, binding: u32) -> wgpu::BindGroupLayoutEntry {
-		wgpu::BindGroupLayoutEntry {
-			binding,
-			visibility: wgpu::ShaderStages::FRAGMENT,
-			ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
 			count: None,
 		}
 	}

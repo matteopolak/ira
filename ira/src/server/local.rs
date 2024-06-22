@@ -1,18 +1,11 @@
-use std::{
-	collections::BTreeMap,
-	fmt, io,
-	sync::{
-		atomic::{AtomicU32, Ordering},
-		mpsc, Arc,
-	},
-};
+use std::{fmt, io, sync::atomic::Ordering};
 
 use tracing::{debug, error, info, warn};
 
 use crate::{
 	client::{Client, ClientId},
 	packet::{self, CreateInstance, Packet, TrustedPacket},
-	App, Context,
+	App,
 };
 
 use super::{InstanceId, Server};
@@ -21,25 +14,6 @@ impl<Message> Server<Message>
 where
 	Message: bitcode::DecodeOwned + bitcode::Encode,
 {
-	pub(crate) fn new(
-		packet_rx: mpsc::Receiver<Packet<Message>>,
-		packet_tx: mpsc::Sender<TrustedPacket<Message>>,
-		client_tx: mpsc::Sender<Client>,
-		client_rx: mpsc::Receiver<Client>,
-		next_instance_id: Arc<AtomicU32>,
-	) -> Self {
-		Self {
-			packet_rx,
-			packet_tx,
-			client_tx,
-			client_rx,
-			clients: BTreeMap::new(),
-			instances: BTreeMap::new(),
-			owners: BTreeMap::new(),
-			next_instance_id,
-		}
-	}
-
 	/// Spawns a new thread to listen for incoming connections.
 	pub(crate) fn run_listener<A: App<Message>>(&self) {
 		let listener = A::listen();
@@ -252,17 +226,5 @@ where
 				self.packet_tx.send(packet).unwrap();
 			}
 		}
-	}
-}
-
-impl<Message> Context<Message> {
-	/// Sends a packet to the server.
-	///
-	/// # Panics
-	///
-	/// Panics if the packet channel has closed, which will only happen if the
-	/// communication with the server has failed.
-	pub fn send_packet(&self, packet: Packet<Message>) {
-		self.packet_tx.send(packet).unwrap();
 	}
 }

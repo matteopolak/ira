@@ -1,9 +1,11 @@
 use ira_drum::Handle;
 
-use crate::{
-	GpuMaterial, GpuMesh, GpuModel, GpuTexture, GpuTextureCollection, MaterialExt, MeshExt,
-	ModelExt, TextureExt,
-};
+use crate::{GpuMesh, GpuModel, ModelExt};
+
+#[cfg(feature = "client")]
+use crate::render::texture::{GpuTexture, GpuTextureCollection, TextureExt};
+#[cfg(feature = "client")]
+use crate::{GpuMaterial, MaterialExt, MeshExt};
 
 #[derive(Debug, Default)]
 pub struct GpuDrum {
@@ -11,7 +13,6 @@ pub struct GpuDrum {
 	pub textures: GpuTextureCollection,
 	#[cfg(feature = "client")]
 	pub materials: Vec<GpuMaterial>,
-	#[cfg(feature = "client")]
 	pub meshes: Vec<GpuMesh>,
 	pub models: Vec<GpuModel>,
 }
@@ -40,13 +41,18 @@ impl GpuDrum {
 }
 
 pub trait DrumExt {
+	#[cfg(feature = "client")]
 	fn create_brdf_bind_group(
 		&self,
 		device: &wgpu::Device,
 		queue: &wgpu::Queue,
 	) -> (wgpu::BindGroup, wgpu::BindGroupLayout);
 
-	fn into_gpu(self, device: &wgpu::Device, queue: &wgpu::Queue) -> GpuDrum;
+	fn into_gpu(
+		self,
+		#[cfg(feature = "client")] device: &wgpu::Device,
+		#[cfg(feature = "client")] queue: &wgpu::Queue,
+	) -> GpuDrum;
 }
 
 impl DrumExt for ira_drum::Drum {
@@ -73,17 +79,26 @@ impl DrumExt for ira_drum::Drum {
 		}
 
 		drum.models = IntoIterator::into_iter(self.models)
-			.map(|m| m.into_gpu(device, &drum))
+			.map(|m| {
+				m.into_gpu(
+					&drum,
+					#[cfg(feature = "client")]
+					device,
+				)
+			})
 			.collect();
 
 		drum
 	}
 
+	#[cfg(feature = "client")]
 	fn create_brdf_bind_group(
 		&self,
 		device: &wgpu::Device,
 		queue: &wgpu::Queue,
 	) -> (wgpu::BindGroup, wgpu::BindGroupLayout) {
+		use ira_drum::Texture;
+
 		let brdf_lut = self.brdf_lut.as_ref().unwrap();
 		let irradiance_map = self.irradiance_map.as_ref().unwrap();
 		let prefiltered_map = self.prefiltered_map.as_ref().unwrap();
@@ -92,11 +107,11 @@ impl DrumExt for ira_drum::Drum {
 			label: None,
 			entries: &[
 				brdf_lut.view_layout(0),
-				brdf_lut.sampler_layout(1),
+				Texture::sampler_layout(1),
 				prefiltered_map.view_layout(2),
-				prefiltered_map.sampler_layout(3),
+				Texture::sampler_layout(3),
 				irradiance_map.view_layout(4),
-				irradiance_map.sampler_layout(5),
+				Texture::sampler_layout(5),
 			],
 		});
 
