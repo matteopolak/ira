@@ -10,7 +10,6 @@ use rapier3d::{
 	geometry::{ColliderBuilder, ColliderHandle, ColliderSet, DefaultBroadPhase, NarrowPhase},
 	pipeline::PhysicsPipeline,
 };
-use tracing::debug;
 
 use crate::{
 	game::Context,
@@ -49,6 +48,8 @@ pub struct PhysicsState {
 
 	pub rigid_bodies: RigidBodySet,
 	pub colliders: ColliderSet,
+
+	pub(crate) steps_since_last_update: u32,
 }
 
 impl Default for PhysicsState {
@@ -64,12 +65,14 @@ impl Default for PhysicsState {
 			ccd_solver: CCDSolver::new(),
 			rigid_bodies: RigidBodySet::new(),
 			colliders: ColliderSet::new(),
+			steps_since_last_update: 0,
 		}
 	}
 }
 
 impl PhysicsState {
 	pub const GRAVITY: Vec3 = Vec3::new(0.0, -9.81, 0.0);
+	pub const TICKS_PER_UPDATE: u32 = 30;
 
 	pub fn step(&mut self) {
 		self.pipeline.step(
@@ -152,6 +155,7 @@ impl IndexExt for Index {
 impl<Message> Context<Message> {
 	pub fn physics_update(&mut self) {
 		self.physics.step();
+		self.physics.steps_since_last_update += 1;
 
 		for body in self
 			.physics
@@ -180,24 +184,29 @@ impl<Message> Context<Message> {
 
 			#[cfg(feature = "server")]
 			{
+				if self.physics.steps_since_last_update < PhysicsState::TICKS_PER_UPDATE {
+					continue;
+				}
+
 				let Some(id) = self.instances.get(&instance) else {
 					continue;
 				};
 
 				let (position, rotation) = (*body.position()).into();
-
-				self.packet_tx
-					.send(Packet::UpdateInstance {
-						id: *id,
-						delta: UpdateInstance {
-							position,
-							rotation,
-							scale: None,
-							body: None,
-						},
-					})
-					.unwrap();
+				let _ = self.packet_tx.send(Packet::UpdateInstance {
+					id: *id,
+					delta: UpdateInstance {
+						position,
+						rotation,
+						scale: None,
+						body: None,
+					},
+				});
 			}
+		}
+
+		if self.physics.steps_since_last_update >= PhysicsState::TICKS_PER_UPDATE {
+			self.physics.steps_since_last_update = 0;
 		}
 	}
 
@@ -231,29 +240,24 @@ impl<Message> Context<Message> {
 	}
 
 	pub fn remove_instance_local(&mut self, instance_id: u32) -> Option<Instance> {
-		let Some(instance) = self.handles.remove(&instance_id) else {
-			return None;
-		};
+		let instance = self.handles.remove(&instance_id)?;
 
 		self.instances.remove(&instance);
 
-		let Some(instance) = self.drum.instances.remove(*instance) else {
-			return None;
-		};
+		let instance = self.drum.instances.remove(*instance)?;
 
 		// swap_remove the gpu instance, then update the other instance pointing to the one at the end
 		let model = &mut self.drum.models[instance.model_id as usize];
-
-		model.instances.swap_remove(instance.instance_id as usize);
+		let _ = model.instances.swap_remove(instance.instance_id as usize);
 
 		// now, we need to know which instance owns that swapped one in O(1)
 		model.handles.swap_remove(instance.instance_id as usize);
 
 		// update the instance that was swapped
 		let handle = model.handles[instance.instance_id as usize];
-		let other_instance = self.drum.instances.get_mut(*handle).unwrap();
-
-		other_instance.instance_id = instance.instance_id;
+		if let Some(other) = self.drum.instances.get_mut(*handle) {
+			other.instance_id = instance.instance_id;
+		}
 
 		Some(instance)
 	}
@@ -274,12 +278,10 @@ impl<Message> Context<Message> {
 
 		let instance_id = self.next_instance_id.fetch_add(1, Ordering::SeqCst);
 
-		self.packet_tx
-			.send(Packet::CreateInstance {
-				id: instance_id,
-				options: CreateInstance::from_builder(&instance, model_id),
-			})
-			.unwrap();
+		let _ = self.packet_tx.send(Packet::CreateInstance {
+			id: instance_id,
+			options: CreateInstance::from_builder(&instance, model_id),
+		});
 
 		let handle = self.add_instance_local(model_id, instance);
 
@@ -358,6 +360,11 @@ impl InstanceHandle {
 		Self { handle }
 	}
 
+	/// Returns the instance associated with the handle.
+	///
+	/// # Panics
+	///
+	/// Panics if the handle is invalid.
 	pub fn resolve<'d>(&self, drum: &'d GpuDrum) -> (&'d GpuInstance, &'d Instance) {
 		let instance = drum.instances.get(self.handle).unwrap();
 
@@ -368,6 +375,10 @@ impl InstanceHandle {
 	}
 
 	/// Returns the instance associated with the handle.
+	///
+	/// # Panics
+	///
+	/// Panics if the handle is invalid.
 	pub fn resolve_mut<'d>(
 		&self,
 		drum: &'d mut GpuDrum,
@@ -381,6 +392,10 @@ impl InstanceHandle {
 	}
 
 	/// Returns the model associated with the instance.
+	///
+	/// # Panics
+	///
+	/// Panics if the handle is invalid.
 	#[must_use]
 	pub fn resolve_model<'d>(&self, drum: &'d GpuDrum) -> &'d GpuModel {
 		let instance = drum.instances.get(self.handle).unwrap();
@@ -389,6 +404,10 @@ impl InstanceHandle {
 	}
 
 	/// Returns the model associated with the instance.
+	///
+	/// # Panics
+	///
+	/// Panics if the handle is invalid.
 	pub fn resolve_model_mut<'d>(&self, drum: &'d mut GpuDrum) -> &'d mut GpuModel {
 		let instance = drum.instances.get(self.handle).unwrap();
 

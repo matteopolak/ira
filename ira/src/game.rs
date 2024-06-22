@@ -1,6 +1,6 @@
 use crate::{
 	camera, light,
-	packet::{Packet, TrustedPacket},
+	packet::{CreateInstance, Packet, TrustedPacket},
 	physics::{InstanceHandle, PhysicsState},
 	render, server, Camera, DrumExt, GpuDrum, GpuTexture, InstanceBuilder, MaterialExt,
 };
@@ -141,9 +141,12 @@ pub struct Context<Message = ()> {
 	pub(crate) packet_rx: mpsc::Receiver<TrustedPacket<Message>>,
 
 	pub(crate) next_instance_id: Arc<AtomicU32>,
+	pub client_id: Option<u32>,
+	pub instance_id: Option<u32>,
 }
 
 impl<Message> Context<Message> {
+	#[allow(clippy::too_many_lines)]
 	async fn new<A: App<Message>>(window: Window, drum: Drum) -> Self
 	where
 		Message: bitcode::Encode + bitcode::DecodeOwned + fmt::Debug + Send + 'static,
@@ -225,15 +228,7 @@ impl<Message> Context<Message> {
 
 		let next_instance_id = Arc::new(AtomicU32::new(0));
 
-		std::thread::spawn({
-			let next_instance_id = Arc::clone(&next_instance_id);
-
-			move || {
-				server::run::<A, _>(server_packet_tx, server_packet_rx, next_instance_id);
-			}
-		});
-
-		Self {
+		let mut ctx = Self {
 			window,
 			device,
 			queue,
@@ -271,8 +266,25 @@ impl<Message> Context<Message> {
 			packet_tx,
 			packet_rx,
 
-			next_instance_id,
-		}
+			next_instance_id: Arc::clone(&next_instance_id),
+			client_id: None,
+			instance_id: None,
+		};
+
+		std::thread::spawn({
+			let (model_id, builder) = A::create_player(&mut ctx);
+
+			move || {
+				server::run::<A, _>(
+					server_packet_tx,
+					server_packet_rx,
+					next_instance_id,
+					CreateInstance::from_builder(&builder, model_id),
+				);
+			}
+		});
+
+		ctx
 	}
 
 	pub fn pressed(&self, key: KeyCode) -> bool {
@@ -432,6 +444,7 @@ impl<A: App<Message>, Message> Game<A, Message> {
 
 				ctx.handles.insert(instance_id, instance);
 				ctx.instances.insert(instance, instance_id);
+				ctx.clients.insert(client_id, instance_id);
 			}
 			Packet::DeleteClient => {
 				let Some(instance_id) = ctx.clients.remove(&client_id) else {
@@ -445,6 +458,10 @@ impl<A: App<Message>, Message> Game<A, Message> {
 				ctx.instances.remove(&handle);
 			}
 			Packet::CreateInstance { options, id } => {
+				if Some(id) == ctx.instance_id {
+					return;
+				}
+
 				let instance = ctx.add_instance_local(options.model_id, options.into_builder());
 
 				ctx.handles.insert(id, instance);
@@ -461,6 +478,10 @@ impl<A: App<Message>, Message> Game<A, Message> {
 				instance.update(ctx, |i, p| {
 					delta.apply(p, i);
 				});
+			}
+			Packet::Connected { instance_id } => {
+				ctx.client_id = Some(client_id);
+				ctx.instance_id = Some(instance_id);
 			}
 		}
 	}
@@ -521,7 +542,12 @@ where
 {
 	fn resumed(&mut self, event_loop: &ActiveEventLoop) {
 		let window = event_loop
-			.create_window(WindowAttributes::default().with_title("Triangle"))
+			.create_window(WindowAttributes::default().with_title(
+				#[cfg(feature = "server")]
+				"Server",
+				#[cfg(not(feature = "server"))]
+				"Client",
+			))
 			.unwrap();
 
 		window.set_cursor_grab(CursorGrabMode::Locked).unwrap();

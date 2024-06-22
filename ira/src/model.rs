@@ -406,19 +406,6 @@ impl Instance {
 		7 => Float32x4,
 	];
 
-	pub(crate) fn new(model_id: u32, instance_id: u32) -> Self {
-		Self {
-			scale: Vec3::ONE,
-			body: Body::Static {
-				position: Vec3::ZERO,
-				rotation: Quat::IDENTITY,
-			},
-			collider: None,
-			instance_id,
-			model_id,
-		}
-	}
-
 	#[must_use]
 	pub(crate) fn desc() -> wgpu::VertexBufferLayout<'static> {
 		wgpu::VertexBufferLayout {

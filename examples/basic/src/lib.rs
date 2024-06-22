@@ -3,6 +3,7 @@ use std::{mem, time::Duration};
 use ira::{
 	extra::camera::CameraController,
 	glam::{Quat, Vec3},
+	packet::{Packet, UpdateInstance},
 	Context, Instance, KeyCode,
 };
 
@@ -13,6 +14,10 @@ pub struct Player {
 
 	pub camera: CameraController,
 	pub speed: f32,
+
+	ticks_since_last_update: u32,
+	last_position: Vec3,
+	last_rotation: Quat,
 }
 
 impl Player {
@@ -22,6 +27,10 @@ impl Player {
 			d_position: Vec3::ZERO,
 			camera: CameraController::default(),
 			speed: 5.0,
+
+			ticks_since_last_update: 0,
+			last_position: Vec3::ZERO,
+			last_rotation: Quat::IDENTITY,
 		}
 	}
 
@@ -69,10 +78,38 @@ impl Player {
 		let (pos, _) = self.instance.body.pos_rot(&ctx.physics);
 		let pos = pos + delta_pos;
 
-		self.instance.set_position_rotation(
-			&mut ctx.physics,
-			pos,
-			Quat::from_rotation_z(self.camera.yaw),
-		);
+		let rot = Quat::from_rotation_y(self.camera.yaw);
+
+		self.instance
+			.set_position_rotation(&mut ctx.physics, pos, rot);
+
+		self.ticks_since_last_update += 1;
+
+		if self.ticks_since_last_update < 2 {
+			return;
+		}
+
+		if let Some(instance_id) = ctx.instance_id {
+			if !pos.abs_diff_eq(self.last_position, 0.001)
+				|| !rot.abs_diff_eq(self.last_rotation, 0.001)
+			{
+				self.last_position = pos;
+				self.last_rotation = rot;
+			} else {
+				return;
+			}
+
+			ctx.send_packet(Packet::UpdateInstance {
+				id: instance_id,
+				delta: UpdateInstance {
+					position: pos,
+					rotation: rot,
+					scale: None,
+					body: None,
+				},
+			});
+
+			self.ticks_since_last_update = 0;
+		}
 	}
 }

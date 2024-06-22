@@ -1,4 +1,9 @@
-use std::{f32::consts::FRAC_PI_4, time::Duration};
+#![allow(dead_code, unused_variables, unused_imports)]
+
+use std::{
+	f32::consts::FRAC_PI_4,
+	time::{Duration, Instant},
+};
 
 use ira::{
 	glam::{Quat, Vec3},
@@ -11,6 +16,8 @@ use ira_drum::Drum;
 struct App {
 	player: basic::Player,
 	cars: Vec<InstanceHandle>,
+
+	last_car_spawn: Instant,
 }
 
 impl ira::App for App {
@@ -19,6 +26,7 @@ impl ira::App for App {
 			2,
 			ira::Instance::builder()
 				.rigidbody(RigidBodyBuilder::dynamic().lock_rotations())
+				.scale(Vec3::splat(0.05))
 				.collider(
 					ctx.drum
 						.model_by_name("orb")
@@ -36,6 +44,7 @@ impl ira::App for App {
 
 	fn on_ready(ctx: &mut Context) -> Self {
 		let car_id = ctx.drum.model_id("bottled_car").unwrap();
+
 		#[cfg(feature = "server")]
 		let cars = (0..10)
 			.map(|i| {
@@ -74,11 +83,30 @@ impl ira::App for App {
 		Self {
 			player: basic::Player::new(Instance::from(body_collider)),
 			cars,
+			last_car_spawn: Instant::now(),
 		}
 	}
 
 	fn on_fixed_update(&mut self, ctx: &mut Context) {
 		self.player.on_fixed_update(ctx);
+
+		#[cfg(feature = "server")]
+		if self.last_car_spawn.elapsed() > Duration::from_secs(1) {
+			self.last_car_spawn = Instant::now();
+
+			let car_id = ctx.drum.model_id("bottled_car").unwrap();
+			let car = ctx.add_instance(
+				car_id,
+				Instance::builder()
+					.up(Vec3::Z)
+					.rotation(Quat::from_rotation_x(FRAC_PI_4))
+					.position(Vec3::new(0.0, 10.0, 0.0))
+					.scale(Vec3::splat(5.0))
+					.rigidbody(RigidBodyBuilder::dynamic()),
+			);
+
+			self.cars.push(car);
+		}
 	}
 
 	fn on_update(&mut self, ctx: &mut Context, delta: Duration) {

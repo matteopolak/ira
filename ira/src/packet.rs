@@ -1,7 +1,4 @@
-use std::{
-	fmt,
-	io::{self, Write},
-};
+use std::io::{self, Write};
 
 use glam::{Quat, Vec3};
 use rapier3d::{dynamics::RigidBodyBuilder, geometry::ColliderBuilder};
@@ -37,6 +34,9 @@ pub enum Packet<Message> {
 	UpdateInstance { id: u32, delta: UpdateInstance },
 	/// A new client has connected.
 	CreateClient { instance_id: u32 },
+	/// The first packet sent to a client, containing its own client id as the receiver
+	/// of the wrapped [`TrustedPacket`], and its own instance id.
+	Connected { instance_id: u32 },
 	/// A client has disconnected.
 	DeleteClient,
 	/// A custom message (application-defined)
@@ -55,6 +55,11 @@ impl<Message> Packet<Message> {
 		}
 	}
 
+	/// Reads a packet from a reader.
+	///
+	/// # Errors
+	///
+	/// See [`bitcode::Error`] and [`io::Error`] for more information.
 	pub fn read<R: io::Read>(reader: &mut R) -> Result<Self, Error>
 	where
 		Message: bitcode::DecodeOwned,
@@ -69,6 +74,11 @@ impl<Message> Packet<Message> {
 		Ok(bitcode::decode(&data)?)
 	}
 
+	/// Writes a packet to multiple writers.
+	///
+	/// # Errors
+	///
+	/// See [`bitcode::Error`] and [`io::Error`] for more information.
 	pub fn write_iter<'w, W: Write + 'w>(
 		&self,
 		writer: impl IntoIterator<Item = &'w mut W>,
@@ -87,6 +97,11 @@ impl<Message> Packet<Message> {
 		Ok(())
 	}
 
+	/// Writes a packet to a writer.
+	///
+	/// # Errors
+	///
+	/// See [`bitcode::Error`] and [`io::Error`] for more information.
 	pub fn write<W: Write>(&self, writer: &mut W) -> io::Result<()>
 	where
 		Message: bitcode::Encode,
@@ -107,6 +122,11 @@ pub struct TrustedPacket<Message> {
 }
 
 impl<Message> TrustedPacket<Message> {
+	/// Reads a packet from a reader.
+	///
+	/// # Errors
+	///
+	/// See [`bitcode::Error`] and [`io::Error`] for more information.
 	pub fn read<R: io::Read>(reader: &mut R) -> Result<Self, Error>
 	where
 		Message: bitcode::DecodeOwned,
@@ -121,6 +141,11 @@ impl<Message> TrustedPacket<Message> {
 		Ok(bitcode::decode(&data)?)
 	}
 
+	/// Writes a packet to multiple writers.
+	///
+	/// # Errors
+	///
+	/// See [`bitcode::Error`] and [`io::Error`] for more information.
 	pub fn write_iter<'w, W: Write + 'w>(
 		&self,
 		writer: impl IntoIterator<Item = &'w mut W>,
@@ -139,6 +164,11 @@ impl<Message> TrustedPacket<Message> {
 		Ok(())
 	}
 
+	/// Writes a packet to a writer.
+	///
+	/// # Errors
+	///
+	/// See [`bitcode::Error`] and [`io::Error`] for more information.
 	pub fn write<W: Write>(&self, writer: &mut W) -> io::Result<()>
 	where
 		Message: bitcode::Encode,

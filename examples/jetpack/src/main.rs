@@ -14,8 +14,8 @@ struct App {
 }
 
 impl ira::App for App {
-	fn create_player() -> (u32, ira::InstanceBuilder) {
-		(2, ira::Instance::builder())
+	fn create_player(_ctx: &mut Context) -> (u32, ira::InstanceBuilder) {
+		unimplemented!()
 	}
 
 	fn on_init() -> Drum {
