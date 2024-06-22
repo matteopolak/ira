@@ -1,12 +1,10 @@
 use crate::{
-	camera,
 	client::ClientId,
-	light,
 	packet::{CreateInstance, Packet, TrustedPacket},
 	physics::{InstanceHandle, PhysicsState},
-	render,
+	render::RenderState,
 	server::{self, InstanceId},
-	Camera, DrumExt, GpuDrum, GpuTexture, InstanceBuilder, MaterialExt,
+	DrumExt, GpuDrum, Instance, InstanceBuilder,
 };
 
 use std::{
@@ -16,8 +14,9 @@ use std::{
 	time::{self, Duration},
 };
 
-use glam::{Vec2, Vec3};
-use ira_drum::{Drum, Material};
+use glam::Vec2;
+use ira_drum::Drum;
+use rapier3d::data::Arena;
 use winit::{
 	application::ApplicationHandler,
 	event::{DeviceEvent, KeyEvent, WindowEvent},
@@ -98,30 +97,9 @@ impl<A: App<Message>, Message> Game<A, Message> {
 
 /// The game context, containing all game-related data.
 pub struct Context<Message = ()> {
-	pub window: Arc<Window>,
-	pub camera: Camera,
-
-	pub(crate) device: wgpu::Device,
-	pub(crate) queue: wgpu::Queue,
-	pub(crate) surface: wgpu::Surface<'static>,
-	pub(crate) config: wgpu::SurfaceConfiguration,
-
-	pub(crate) brdf_bind_group: wgpu::BindGroup,
-
-	opaque_render_pipeline: wgpu::RenderPipeline,
-	transparent_render_pipeline: wgpu::RenderPipeline,
-
-	pub(crate) depth_texture: GpuTexture,
-
-	lights: light::Lights,
-
 	last_frame: time::Instant,
 	last_physics: time::Instant,
 
-	pub(crate) sample_count: u32,
-	pub(crate) multisampled_texture: GpuTexture,
-
-	pub drum: GpuDrum,
 	pub physics: PhysicsState,
 
 	pub(crate) desired_fps: f32,
@@ -131,8 +109,10 @@ pub struct Context<Message = ()> {
 	pub(crate) mouse_delta: Vec2,
 
 	pub(crate) handles: BTreeMap<InstanceId, InstanceHandle>,
-	pub(crate) instances: BTreeMap<InstanceHandle, InstanceId>,
+	pub(crate) instance_ids: BTreeMap<InstanceHandle, InstanceId>,
 	pub(crate) clients: BTreeMap<ClientId, InstanceId>,
+
+	pub instances: Arena<Instance>,
 
 	/// Used to send messages to the thread that communicates with the server.
 	/// If the "server" feature is enabled, this will be directly to the server.
@@ -144,6 +124,10 @@ pub struct Context<Message = ()> {
 	pub(crate) next_instance_id: Arc<AtomicU32>,
 	pub client_id: Option<ClientId>,
 	pub instance_id: Option<InstanceId>,
+
+	pub drum: GpuDrum,
+	#[cfg(feature = "client")]
+	pub render: RenderState,
 }
 
 impl<Message> Context<Message> {
@@ -152,106 +136,28 @@ impl<Message> Context<Message> {
 	where
 		Message: bitcode::Encode + bitcode::DecodeOwned + fmt::Debug + Send + 'static,
 	{
-		let window = Arc::new(window);
-		let size = window.inner_size();
-		let instance = wgpu::Instance::default();
-
-		let surface = instance.create_surface(window.clone()).unwrap();
-		let adapter = render::request_adapter(&instance, &surface).await;
-
-		let (device, queue) = render::request_device(&adapter).await;
-
-		let config = wgpu::SurfaceConfiguration {
-			usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-			format: wgpu::TextureFormat::Rgba8UnormSrgb,
-			width: size.width,
-			height: size.height,
-			desired_maximum_frame_latency: 2,
-			present_mode: wgpu::PresentMode::Mailbox,
-			alpha_mode: wgpu::CompositeAlphaMode::Auto,
-			view_formats: vec![],
-		};
-
-		surface.configure(&device, &config);
-
-		let sample_flags = adapter.get_texture_format_features(config.format).flags;
-
-		let sample_count = {
-			if sample_flags.contains(wgpu::TextureFormatFeatureFlags::MULTISAMPLE_X16) {
-				16
-			} else if sample_flags.contains(wgpu::TextureFormatFeatureFlags::MULTISAMPLE_X8) {
-				8
-			} else if sample_flags.contains(wgpu::TextureFormatFeatureFlags::MULTISAMPLE_X4) {
-				4
-			} else if sample_flags.contains(wgpu::TextureFormatFeatureFlags::MULTISAMPLE_X2) {
-				2
-			} else {
-				1
-			}
-		};
-
-		let depth_texture =
-			GpuTexture::create_depth_texture(&device, &config, sample_count, "depth_texture");
-
-		let (brdf_bind_group, brdf_bind_group_layout) =
-			drum.create_brdf_bind_group(&device, &queue);
-
+		#[cfg(feature = "client")]
+		let render = RenderState::new(window, &drum).await;
 		let physics = PhysicsState::default();
-		let drum = drum.into_gpu(&device, &queue);
-
-		let material_bind_group_layout = Material::create_bind_group_layout(&device);
-		let camera_settings = camera::Settings::new(config.width as f32, config.height as f32);
-		let camera = camera::CameraUniform::from_settings(&camera_settings).into_gpu(&device);
-		let camera = Camera::new(camera, camera_settings);
-
-		let lights = light::Lights::from_lights(
-			&[
-				light::GpuLight::from_position(Vec3::new(0.0, 2.0, 0.0)),
-				light::GpuLight::from_position(Vec3::new(2.0, 0.0, 0.0)),
-			],
-			&device,
-		);
-
-		let (opaque_render_pipeline, transparent_render_pipeline) =
-			render::create_pbr_render_pipelines(
-				&device,
-				&material_bind_group_layout,
-				&brdf_bind_group_layout,
-				&camera,
-				&lights,
-				sample_count,
-			);
-
-		let multisampled_texture = GpuTexture::create_multisampled(&device, &config, sample_count);
 
 		let (server_packet_tx, packet_rx) = mpsc::channel();
 		let (packet_tx, server_packet_rx) = mpsc::channel();
 
 		let next_instance_id = Arc::new(AtomicU32::new(0));
 
+		let drum = drum.into_gpu(
+			#[cfg(feature = "client")]
+			&render.device,
+			#[cfg(feature = "client")]
+			&render.queue,
+		);
+
 		let mut ctx = Self {
-			window,
-			device,
-			queue,
-			surface,
-			config,
-
-			opaque_render_pipeline,
-			transparent_render_pipeline,
-
-			brdf_bind_group,
-
-			camera,
-			depth_texture,
-
-			lights,
-
+			#[cfg(feature = "client")]
+			render,
+			drum,
 			last_frame: time::Instant::now(),
 			last_physics: time::Instant::now(),
-			sample_count,
-
-			multisampled_texture,
-			drum,
 			physics,
 
 			desired_fps: 120.0,
@@ -261,7 +167,8 @@ impl<Message> Context<Message> {
 			mouse_delta: Vec2::ZERO,
 
 			handles: BTreeMap::new(),
-			instances: BTreeMap::new(),
+			instance_ids: BTreeMap::new(),
+			instances: Arena::new(),
 			clients: BTreeMap::new(),
 
 			packet_tx,
@@ -299,138 +206,6 @@ impl<Message> Context<Message> {
 	pub fn mouse_delta(&self) -> Vec2 {
 		self.mouse_delta
 	}
-
-	fn resize(&mut self, size: winit::dpi::PhysicalSize<u32>) {
-		self.config.width = size.width.max(1);
-		self.config.height = size.height.max(1);
-
-		self.camera
-			.settings
-			.projection
-			.resize(self.config.width as f32, self.config.height as f32);
-		self.depth_texture
-			.resize(&self.device, self.config.width, self.config.height);
-		self.multisampled_texture
-			.resize(&self.device, self.config.width, self.config.height);
-
-		self.surface.configure(&self.device, &self.config);
-		self.window.request_redraw();
-	}
-
-	fn render(&self) -> Result<(), wgpu::SurfaceError> {
-		let frame = self.surface.get_current_texture()?;
-		let mut encoder = self
-			.device
-			.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
-		let view = if self.sample_count > 1 {
-			&self.multisampled_texture.view
-		} else {
-			&frame
-				.texture
-				.create_view(&wgpu::TextureViewDescriptor::default())
-		};
-
-		let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-			label: None,
-			color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-				view,
-				resolve_target: None,
-				ops: wgpu::Operations {
-					load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-					store: wgpu::StoreOp::Store,
-				},
-			})],
-			depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-				view: &self.depth_texture.view,
-				depth_ops: Some(wgpu::Operations {
-					load: wgpu::LoadOp::Clear(1.0),
-					store: wgpu::StoreOp::Store,
-				}),
-				stencil_ops: None,
-			}),
-			timestamp_writes: None,
-			occlusion_query_set: None,
-		});
-
-		rpass.set_pipeline(&self.opaque_render_pipeline);
-
-		for model in &self.drum.models {
-			model.draw_instanced(
-				&mut rpass,
-				&self.drum,
-				&self.camera.gpu.bind_group,
-				&self.lights.bind_group,
-				&self.brdf_bind_group,
-				false,
-			);
-		}
-
-		drop(rpass);
-
-		let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-			label: None,
-			color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-				view,
-				resolve_target: None,
-				ops: wgpu::Operations {
-					load: wgpu::LoadOp::Load,
-					store: wgpu::StoreOp::Store,
-				},
-			})],
-			depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-				view: &self.depth_texture.view,
-				depth_ops: Some(wgpu::Operations {
-					load: wgpu::LoadOp::Load,
-					store: wgpu::StoreOp::Store,
-				}),
-				stencil_ops: None,
-			}),
-			timestamp_writes: None,
-			occlusion_query_set: None,
-		});
-
-		rpass.set_pipeline(&self.transparent_render_pipeline);
-
-		for model in &self.drum.models {
-			model.draw_instanced(
-				&mut rpass,
-				&self.drum,
-				&self.camera.gpu.bind_group,
-				&self.lights.bind_group,
-				&self.brdf_bind_group,
-				true,
-			);
-		}
-
-		drop(rpass);
-
-		if self.sample_count > 1 {
-			let frame_view = frame
-				.texture
-				.create_view(&wgpu::TextureViewDescriptor::default());
-
-			// copy MSAA texture to frame view
-			encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-				label: None,
-				color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-					view,
-					resolve_target: Some(&frame_view),
-					ops: wgpu::Operations {
-						load: wgpu::LoadOp::Load,
-						store: wgpu::StoreOp::Store,
-					},
-				})],
-				depth_stencil_attachment: None,
-				timestamp_writes: None,
-				occlusion_query_set: None,
-			});
-		}
-
-		self.queue.submit(Some(encoder.finish()));
-		frame.present();
-
-		Ok(())
-	}
 }
 
 impl<A: App<Message>, Message> Game<A, Message> {
@@ -444,7 +219,7 @@ impl<A: App<Message>, Message> Game<A, Message> {
 				let instance = ctx.add_instance_local(model_id, instance);
 
 				ctx.handles.insert(instance_id, instance);
-				ctx.instances.insert(instance, instance_id);
+				ctx.instance_ids.insert(instance, instance_id);
 				ctx.clients.insert(client_id, instance_id);
 			}
 			Packet::DeleteClient => {
@@ -456,7 +231,7 @@ impl<A: App<Message>, Message> Game<A, Message> {
 					return;
 				};
 
-				ctx.instances.remove(&handle);
+				ctx.instance_ids.remove(&handle);
 			}
 			Packet::CreateInstance { options, id } => {
 				if Some(id) == ctx.instance_id {
@@ -466,7 +241,7 @@ impl<A: App<Message>, Message> Game<A, Message> {
 				let instance = ctx.add_instance_local(options.model_id, options.into_builder());
 
 				ctx.handles.insert(id, instance);
-				ctx.instances.insert(instance, id);
+				ctx.instance_ids.insert(instance, id);
 			}
 			Packet::DeleteInstance { id } => {
 				ctx.remove_instance_local(id);
@@ -516,22 +291,26 @@ impl<A: App<Message>, Message> Game<A, Message> {
 			ctx.last_frame = time::Instant::now();
 
 			app.on_update(ctx, delta);
-			ctx.camera.update_view_proj(&ctx.queue);
+			#[cfg(feature = "client")]
+			ctx.render.camera.update_view_proj(&ctx.render.queue);
 
 			ctx.just_pressed.clear();
 			ctx.mouse_delta = Vec2::ZERO;
 
-			for model in &mut ctx.drum.models {
-				model.update_instance_buffer(&ctx.device, &ctx.queue);
-			}
-
-			match ctx.render() {
-				Ok(..) => {}
-				Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
-					ctx.resize(ctx.window.inner_size());
+			#[cfg(feature = "client")]
+			{
+				for model in &mut ctx.drum.models {
+					model.update_instance_buffer(&ctx.render.device, &ctx.render.queue);
 				}
-				Err(wgpu::SurfaceError::OutOfMemory) => event_loop.exit(),
-				Err(wgpu::SurfaceError::Timeout) => log::warn!("surface timeout"),
+
+				match ctx.render.render_frame(&ctx.drum) {
+					Ok(..) => {}
+					Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
+						ctx.render.resize(ctx.render.window.inner_size());
+					}
+					Err(wgpu::SurfaceError::OutOfMemory) => event_loop.exit(),
+					Err(wgpu::SurfaceError::Timeout) => log::warn!("surface timeout"),
+				}
 			}
 		}
 	}
@@ -590,13 +369,13 @@ where
 			return;
 		};
 
-		if window_id != ctx.window.id() {
+		if window_id != ctx.render.window.id() {
 			return;
 		}
 
 		match event {
 			WindowEvent::Resized(size) => {
-				ctx.resize(size);
+				ctx.render.resize(size);
 			}
 			WindowEvent::RedrawRequested => {
 				self.render(event_loop);
@@ -619,12 +398,13 @@ where
 					}
 
 					match key {
-						KeyCode::F11 if ctx.window.fullscreen().is_none() => {
-							ctx.window
+						KeyCode::F11 if ctx.render.window.fullscreen().is_none() => {
+							ctx.render
+								.window
 								.set_fullscreen(Some(Fullscreen::Borderless(None)));
 						}
 						KeyCode::F11 => {
-							ctx.window.set_fullscreen(None);
+							ctx.render.window.set_fullscreen(None);
 						}
 						_ => {}
 					}

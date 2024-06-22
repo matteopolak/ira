@@ -55,10 +55,12 @@ pub enum Packet<Message> {
 }
 
 impl<Message> Packet<Message> {
+	/// Creates a new packet with custom message.
 	pub fn new(message: Message) -> Self {
 		Self::Custom(message)
 	}
 
+	/// Wraps this packet in a [`TrustedPacket`] with the given client id.
 	pub fn into_trusted(self, client_id: ClientId) -> TrustedPacket<Message> {
 		TrustedPacket {
 			client_id,

@@ -1,23 +1,24 @@
 use ira_drum::Handle;
-use rapier3d::data::Arena;
 
 use crate::{
-	GpuMaterial, GpuMesh, GpuModel, GpuTexture, GpuTextureCollection, Instance, MaterialExt,
-	MeshExt, ModelExt, TextureExt,
+	GpuMaterial, GpuMesh, GpuModel, GpuTexture, GpuTextureCollection, MaterialExt, MeshExt,
+	ModelExt, TextureExt,
 };
 
 #[derive(Debug, Default)]
 pub struct GpuDrum {
+	#[cfg(feature = "client")]
 	pub textures: GpuTextureCollection,
+	#[cfg(feature = "client")]
 	pub materials: Vec<GpuMaterial>,
+	#[cfg(feature = "client")]
 	pub meshes: Vec<GpuMesh>,
 	pub models: Vec<GpuModel>,
-
-	pub instances: Arena<Instance>,
 }
 
 impl GpuDrum {
 	/// Adds a texture to the drum, returning a handle to it.
+	#[cfg(feature = "client")]
 	pub fn add_texture(&mut self, texture: GpuTexture) -> Handle<GpuTexture> {
 		self.textures.add_texture(texture)
 	}
@@ -49,20 +50,27 @@ pub trait DrumExt {
 }
 
 impl DrumExt for ira_drum::Drum {
-	fn into_gpu(self, device: &wgpu::Device, queue: &wgpu::Queue) -> GpuDrum {
+	fn into_gpu(
+		self,
+		#[cfg(feature = "client")] device: &wgpu::Device,
+		#[cfg(feature = "client")] queue: &wgpu::Queue,
+	) -> GpuDrum {
 		let mut drum = GpuDrum::default();
 
-		drum.textures.bank = self
-			.textures
-			.iter()
-			.map(|t| t.to_gpu(device, queue))
-			.collect::<Vec<_>>();
+		#[cfg(feature = "client")]
+		{
+			drum.textures.bank = self
+				.textures
+				.iter()
+				.map(|t| t.to_gpu(device, queue))
+				.collect::<Vec<_>>();
 
-		drum.materials = IntoIterator::into_iter(self.materials)
-			.map(|m| m.into_gpu(device, queue, &mut drum))
-			.collect();
+			drum.materials = IntoIterator::into_iter(self.materials)
+				.map(|m| m.into_gpu(device, queue, &mut drum))
+				.collect();
 
-		drum.meshes = self.meshes.iter().map(|m| m.to_gpu(device)).collect();
+			drum.meshes = self.meshes.iter().map(|m| m.to_gpu(device)).collect();
+		}
 
 		drum.models = IntoIterator::into_iter(self.models)
 			.map(|m| m.into_gpu(device, &drum))

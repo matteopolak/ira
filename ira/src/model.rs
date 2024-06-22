@@ -94,15 +94,20 @@ impl From<ira_drum::MeshHandles> for GpuMeshHandles {
 pub struct GpuModel {
 	pub(crate) name: Box<str>,
 
+	#[cfg(feature = "client")]
 	pub(crate) meshes: GpuMeshHandles,
+	#[cfg(feature = "client")]
 	pub(crate) instance_buffer: wgpu::Buffer,
 
 	// INVARIANT: instances.len() == handles.len()
+	#[cfg(feature = "client")]
 	pub(crate) instances: Vec<GpuInstance>,
 	pub(crate) handles: Vec<InstanceHandle>,
 	pub(crate) bounds: BoundingBox,
 
+	#[cfg(feature = "client")]
 	last_instance_count: usize,
+	#[cfg(feature = "client")]
 	pub(crate) dirty: bool,
 }
 
@@ -110,23 +115,27 @@ impl GpuModel {
 	#[must_use]
 	pub fn new(
 		device: &wgpu::Device,
-		drum: &GpuDrum,
-		meshes: GpuMeshHandles,
+		#[cfg(feature = "client")] drum: &GpuDrum,
+		#[cfg(feature = "client")] meshes: GpuMeshHandles,
 		name: Box<str>,
 	) -> Self {
 		let (min, max) = meshes.min_max(drum);
 
 		Self {
-			name,
-
-			meshes,
-			instance_buffer: Self::create_instance_buffer(device, &[]),
-			last_instance_count: 0,
-
 			handles: Vec::new(),
-			instances: Vec::new(),
-
 			bounds: BoundingBox { min, max },
+
+			#[cfg(feature = "client")]
+			name,
+			#[cfg(feature = "client")]
+			meshes,
+			#[cfg(feature = "client")]
+			instance_buffer: Self::create_instance_buffer(device, &[]),
+			#[cfg(feature = "client")]
+			last_instance_count: 0,
+			#[cfg(feature = "client")]
+			instances: Vec::new(),
+			#[cfg(feature = "client")]
 			dirty: false,
 		}
 	}

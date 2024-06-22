@@ -65,7 +65,7 @@ impl Player {
 
 		let (pos, _) = self.instance.body.pos_rot(&ctx.physics);
 
-		ctx.camera.apply(
+		ctx.render.camera.apply(
 			pos + self.d_position + Vec3::Y * 0.1,
 			self.camera.yaw,
 			self.camera.pitch,

@@ -1,8 +1,8 @@
-use std::{ops, sync::atomic::Ordering};
+use std::ops;
 
 use glam::Vec3;
 use rapier3d::{
-	data::Index,
+	data::{Arena, Index},
 	dynamics::{
 		CCDSolver, ImpulseJointSet, IntegrationParameters, IslandManager, MultibodyJointSet,
 		RigidBodyBuilder, RigidBodyHandle, RigidBodySet,
@@ -175,10 +175,13 @@ impl<Message> Context<Message> {
 
 			let instance: InstanceHandle = body.user_data.into();
 
-			instance.resolve_model_mut(&mut self.drum).dirty = true;
-
+			#[cfg(feature = "client")]
 			{
-				let (gpu, instance) = instance.resolve_mut(&mut self.drum);
+				instance
+					.resolve_model_mut(&mut self.drum, &self.instances)
+					.dirty = true;
+
+				let (gpu, instance) = instance.resolve_mut(&mut self.drum, &mut self.instances);
 
 				*gpu = instance.to_gpu(&self.physics);
 			}
@@ -189,7 +192,7 @@ impl<Message> Context<Message> {
 					continue;
 				}
 
-				let Some(id) = self.instances.get(&instance) else {
+				let Some(id) = self.instance_ids.get(&instance) else {
 					continue;
 				};
 
@@ -243,20 +246,42 @@ impl<Message> Context<Message> {
 	pub fn remove_instance_local(&mut self, id: InstanceId) -> Option<Instance> {
 		let instance = self.handles.remove(&id)?;
 
-		self.instances.remove(&instance);
+		self.instance_ids.remove(&instance);
 
-		let instance = self.drum.instances.remove(*instance)?;
+		let instance = self.instances.remove(*instance)?;
+
+		if let Body::Rigid(handle) = instance.body {
+			self.physics.rigid_bodies.remove(
+				handle,
+				&mut self.physics.islands,
+				&mut self.physics.colliders,
+				&mut self.physics.impulse_joins,
+				&mut self.physics.multibody_joints,
+				true,
+			);
+		} else if let Some(collider) = instance.collider {
+			self.physics.colliders.remove(
+				collider,
+				&mut self.physics.islands,
+				&mut self.physics.rigid_bodies,
+				true,
+			);
+		}
 
 		// swap_remove the gpu instance, then update the other instance pointing to the one at the end
 		let model = &mut self.drum.models[instance.model_id as usize];
-		let _ = model.instances.swap_remove(instance.instance_id as usize);
+
+		#[cfg(feature = "client")]
+		{
+			let _ = model.instances.swap_remove(instance.instance_id as usize);
+		}
 
 		// now, we need to know which instance owns that swapped one in O(1)
 		model.handles.swap_remove(instance.instance_id as usize);
 
 		// update the instance that was swapped
 		let handle = model.handles[instance.instance_id as usize];
-		if let Some(other) = self.drum.instances.get_mut(*handle) {
+		if let Some(other) = self.instances.get_mut(*handle) {
 			other.instance_id = instance.instance_id;
 		}
 
@@ -275,6 +300,8 @@ impl<Message> Context<Message> {
 
 	#[cfg(feature = "server")]
 	pub fn add_instance(&mut self, model_id: u32, instance: InstanceBuilder) -> InstanceHandle {
+		use std::sync::atomic::Ordering;
+
 		let instance_id = InstanceId::new(self.next_instance_id.fetch_add(1, Ordering::SeqCst));
 
 		let _ = self.packet_tx.send(Packet::CreateInstance {
@@ -284,7 +311,7 @@ impl<Message> Context<Message> {
 
 		let handle = self.add_instance_local(model_id, instance);
 
-		self.instances.insert(handle, instance_id);
+		self.instance_ids.insert(handle, instance_id);
 		self.handles.insert(instance_id, handle);
 
 		handle
@@ -303,7 +330,7 @@ impl<Message> Context<Message> {
 	) -> InstanceHandle {
 		let model = &mut self.drum.models[model_id as usize];
 		let instance_id = model.instances.len() as u32;
-		let index = self.drum.instances.insert_with(|handle| {
+		let index = self.instances.insert_with(|handle| {
 			let (axis, angle) = instance.rotation.to_axis_angle();
 
 			match (instance.rigidbody, instance.collider) {
@@ -364,8 +391,12 @@ impl InstanceHandle {
 	/// # Panics
 	///
 	/// Panics if the handle is invalid.
-	pub fn resolve<'d>(&self, drum: &'d GpuDrum) -> (&'d GpuInstance, &'d Instance) {
-		let instance = drum.instances.get(self.handle).unwrap();
+	pub fn resolve<'d>(
+		&self,
+		drum: &'d GpuDrum,
+		instances: &'d Arena<Instance>,
+	) -> (&'d GpuInstance, &'d Instance) {
+		let instance = instances.get(self.handle).unwrap();
 
 		(
 			&drum.models[instance.model_id as usize].instances[instance.instance_id as usize],
@@ -381,8 +412,9 @@ impl InstanceHandle {
 	pub fn resolve_mut<'d>(
 		&self,
 		drum: &'d mut GpuDrum,
+		instances: &'d mut Arena<Instance>,
 	) -> (&'d mut GpuInstance, &'d mut Instance) {
-		let instance = drum.instances.get_mut(self.handle).unwrap();
+		let instance = instances.get_mut(self.handle).unwrap();
 
 		(
 			&mut drum.models[instance.model_id as usize].instances[instance.instance_id as usize],
@@ -396,8 +428,12 @@ impl InstanceHandle {
 	///
 	/// Panics if the handle is invalid.
 	#[must_use]
-	pub fn resolve_model<'d>(&self, drum: &'d GpuDrum) -> &'d GpuModel {
-		let instance = drum.instances.get(self.handle).unwrap();
+	pub fn resolve_model<'d>(
+		&self,
+		drum: &'d GpuDrum,
+		instances: &'d Arena<Instance>,
+	) -> &'d GpuModel {
+		let instance = instances.get(self.handle).unwrap();
 
 		&drum.models[instance.model_id as usize]
 	}
@@ -407,8 +443,12 @@ impl InstanceHandle {
 	/// # Panics
 	///
 	/// Panics if the handle is invalid.
-	pub fn resolve_model_mut<'d>(&self, drum: &'d mut GpuDrum) -> &'d mut GpuModel {
-		let instance = drum.instances.get(self.handle).unwrap();
+	pub fn resolve_model_mut<'d>(
+		&self,
+		drum: &'d mut GpuDrum,
+		instances: &'d Arena<Instance>,
+	) -> &'d mut GpuModel {
+		let instance = instances.get(self.handle).unwrap();
 
 		&mut drum.models[instance.model_id as usize]
 	}
@@ -428,13 +468,17 @@ impl InstanceHandle {
 	where
 		F: FnOnce(&mut Instance, &mut PhysicsState),
 	{
-		let (gpu, instance) = self.resolve_mut(&mut ctx.drum);
+		let (gpu, instance) = self.resolve_mut(&mut ctx.drum, &mut ctx.instances);
 		let model_id = instance.model_id as usize;
 
 		update(instance, &mut ctx.physics);
-		*gpu = instance.to_gpu(&ctx.physics);
 
-		ctx.drum.models[model_id].dirty = true;
+		#[cfg(feature = "client")]
+		{
+			*gpu = instance.to_gpu(&ctx.physics);
+
+			ctx.drum.models[model_id].dirty = true;
+		}
 	}
 }
 
