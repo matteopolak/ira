@@ -1,5 +1,6 @@
 use std::{
-	io,
+	io::{self, Read},
+	mem,
 	net::TcpStream,
 	sync::atomic::{AtomicU32, Ordering},
 };
@@ -25,20 +26,101 @@ impl ClientId {
 	}
 }
 
+pub struct PartialPacket {
+	pub(crate) len: Option<usize>,
+	pub(crate) data: Vec<u8>,
+	pub(crate) offset: usize,
+}
+
+impl Default for PartialPacket {
+	fn default() -> Self {
+		Self {
+			len: None,
+			data: vec![0; 4],
+			offset: 0,
+		}
+	}
+}
+
 pub struct Client {
-	stream: TcpStream,
-	id: ClientId,
+	pub(crate) stream: TcpStream,
+	pub(crate) id: ClientId,
+
+	/// A partial packet that is being read.
+	///
+	/// When reading the next packet, check if this is `Some`. If it is,
+	/// read the remaining data into the partial packet.
+	pub(crate) next_packet: PartialPacket,
 }
 
 impl Client {
+	/// Creates a new client from a stream.
+	///
+	/// # Panics
+	///
+	/// Panics if the stream cannot be cloned.
 	#[must_use]
 	pub fn new(stream: TcpStream, id: ClientId) -> Self {
-		Self { stream, id }
+		Self {
+			stream,
+			id,
+			next_packet: PartialPacket::default(),
+		}
 	}
 
 	#[must_use]
 	pub fn id(&self) -> ClientId {
 		self.id
+	}
+
+	/// Tries to complete the current packet, returning
+	/// the packet data if it completes.
+	pub fn next_packet(&mut self) -> io::Result<Vec<u8>> {
+		let mut partial = mem::take(&mut self.next_packet);
+
+		let len = match partial.len {
+			Some(len) => len,
+			None => {
+				while partial.offset < 4 {
+					let n = match self.stream.read(&mut partial.data[partial.offset..4]) {
+						Ok(n) => n,
+						Err(e) => {
+							self.next_packet = partial;
+							return Err(e);
+						}
+					};
+
+					partial.offset += n;
+				}
+
+				let len = u32::from_le_bytes([
+					partial.data[0],
+					partial.data[1],
+					partial.data[2],
+					partial.data[3],
+				]) as usize;
+
+				partial.len = Some(len);
+				partial.data.resize(len, 0);
+				partial.offset = 0;
+
+				len
+			}
+		};
+
+		while partial.offset < len {
+			let n = match self.stream.read(&mut partial.data[partial.offset..len]) {
+				Ok(n) => n,
+				Err(e) => {
+					self.next_packet = partial;
+					return Err(e);
+				}
+			};
+
+			partial.offset += n;
+		}
+
+		Ok(partial.data)
 	}
 
 	/// Tries to read a packet from the client.
@@ -54,7 +136,7 @@ impl Client {
 	where
 		Message: bitcode::DecodeOwned + bitcode::Encode,
 	{
-		let packet = Packet::read(&mut self.stream)?;
+		let packet = Packet::read(self)?;
 
 		match packet {
 			Packet::CreateInstance { .. } => {

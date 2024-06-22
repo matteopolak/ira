@@ -90,8 +90,8 @@ impl Player {
 		}
 
 		if let Some(instance_id) = ctx.instance_id {
-			if !pos.abs_diff_eq(self.last_position, 0.001)
-				|| !rot.abs_diff_eq(self.last_rotation, 0.001)
+			if !pos.abs_diff_eq(self.last_position, 0.0001)
+				|| !rot.abs_diff_eq(self.last_rotation, 0.0001)
 			{
 				self.last_position = pos;
 				self.last_rotation = rot;

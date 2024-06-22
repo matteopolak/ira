@@ -97,6 +97,25 @@ impl ira::App for App {
 	fn on_update(&mut self, ctx: &mut Context, delta: Duration) {
 		#[cfg(feature = "client")]
 		self.player.on_update(ctx, delta);
+
+		#[cfg(all(feature = "server", feature = "client"))]
+		if ctx.pressed(ira::KeyCode::KeyC) && self.last_car_spawn.elapsed() > Duration::from_secs(1)
+		{
+			self.last_car_spawn = Instant::now();
+
+			let car_id = ctx.drum.model_id("bottled_car").unwrap();
+			self.cars.push(
+				ctx.add_instance(
+					car_id,
+					Instance::builder()
+						.up(Vec3::Z)
+						.rotation(Quat::from_rotation_x(FRAC_PI_4))
+						.position(Vec3::new(0.0, 10.0, 0.0))
+						.scale(Vec3::splat(5.0))
+						.rigidbody(RigidBodyBuilder::dynamic()),
+				),
+			);
+		}
 	}
 }
 

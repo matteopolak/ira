@@ -73,18 +73,11 @@ impl<Message> Packet<Message> {
 	/// # Errors
 	///
 	/// See [`bitcode::Error`] and [`io::Error`] for more information.
-	pub fn read<R: io::Read>(reader: &mut R) -> Result<Self, Error>
+	pub fn read(client: &mut Client) -> Result<Self, Error>
 	where
 		Message: bitcode::DecodeOwned,
 	{
-		let mut len = [0; 4];
-		reader.read_exact(&mut len)?;
-
-		let len = u32::from_le_bytes(len) as usize;
-		let mut data = vec![0; len];
-		reader.read_exact(&mut data)?;
-
-		Ok(bitcode::decode(&data)?)
+		read(client)
 	}
 
 	/// Writes a packet to multiple writers.
@@ -140,18 +133,11 @@ impl<Message> TrustedPacket<Message> {
 	/// # Errors
 	///
 	/// See [`bitcode::Error`] and [`io::Error`] for more information.
-	pub fn read<R: io::Read>(reader: &mut R) -> Result<Self, Error>
+	pub fn read(client: &mut Client) -> Result<Self, Error>
 	where
 		Message: bitcode::DecodeOwned,
 	{
-		let mut len = [0; 4];
-		reader.read_exact(&mut len)?;
-
-		let len = u32::from_le_bytes(len) as usize;
-		let mut data = vec![0; len];
-		reader.read_exact(&mut data)?;
-
-		Ok(bitcode::decode(&data)?)
+		read(client)
 	}
 
 	/// Writes a packet to multiple writers.
@@ -189,6 +175,15 @@ impl<Message> TrustedPacket<Message> {
 		writer.write_all(&len)?;
 		writer.write_all(&data)
 	}
+}
+
+fn read<T>(client: &mut Client) -> Result<T, Error>
+where
+	T: bitcode::DecodeOwned,
+{
+	let buf = client.next_packet()?;
+
+	Ok(bitcode::decode(&buf)?)
 }
 
 /// A packet for creating a new collider.

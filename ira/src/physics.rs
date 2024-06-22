@@ -76,7 +76,7 @@ impl Default for PhysicsState {
 
 impl PhysicsState {
 	pub const GRAVITY: Vec3 = Vec3::new(0.0, -9.81, 0.0);
-	pub const TICKS_PER_UPDATE: u32 = 30;
+	pub const TICKS_PER_UPDATE: u32 = 10;
 
 	pub fn step(&mut self) {
 		self.pipeline.step(

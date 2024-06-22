@@ -3,7 +3,7 @@ use crate::{
 	packet::{CreateInstance, Packet, TrustedPacket},
 	physics::{InstanceHandle, PhysicsState},
 	server::{self, InstanceId},
-	Body, DrumExt, GpuDrum, Instance, InstanceBuilder,
+	DrumExt, GpuDrum, Instance, InstanceBuilder,
 };
 
 #[cfg(feature = "client")]

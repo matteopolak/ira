@@ -1,8 +1,9 @@
-use std::fmt;
+use std::{fmt, io::BufReader, io::BufWriter};
 
 use tracing::info;
 
 use crate::{
+	client::{Client, ClientId},
 	packet::{Packet, TrustedPacket},
 	App,
 };
@@ -17,13 +18,15 @@ where
 	where
 		Message: fmt::Debug,
 	{
-		let mut stream = A::connect();
+		let stream = A::connect();
 		let addr = stream.peer_addr().unwrap();
 
 		info!(addr = %addr, "connected to server");
 
+		let mut client = Client::new(stream, ClientId::SERVER);
+
 		// get client id
-		let packet = TrustedPacket::<Message>::read(&mut stream).unwrap();
+		let packet = TrustedPacket::<Message>::read(&mut client).unwrap();
 		let Packet::Connected { instance_id } = packet.inner else {
 			panic!("expected SetClientId packet, got {packet:?}");
 		};
@@ -33,17 +36,19 @@ where
 			?instance_id, "received connection packet from server"
 		);
 
-		stream.set_nonblocking(true).unwrap();
+		client.id = packet.client_id;
+
+		client.stream.set_nonblocking(true).unwrap();
 		self.packet_tx.send(packet).unwrap();
 
 		loop {
 			// read from local
 			while let Ok(packet) = self.packet_rx.try_recv() {
-				packet.write(&mut stream).unwrap();
+				packet.write(&mut client).unwrap();
 			}
 
 			// read from server
-			if let Ok(packet) = TrustedPacket::read(&mut stream) {
+			if let Ok(packet) = TrustedPacket::read(&mut client) {
 				self.packet_tx.send(packet).unwrap();
 			}
 		}
