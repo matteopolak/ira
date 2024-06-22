@@ -15,12 +15,16 @@ env_logger = "0.11"
 glam = "0.27"
 gltf = { version = "1", features = ["import"] }
 image = "0.25"
-ira_drum.path = "../ira_drum"
 log = "0.4"
 nalgebra = { version = "0.32", features = ["convert-glam027"] }
 pollster = "0.3"
 rapier3d = "0.20"
 tracing = "0.1"
+
+[dependencies.ira_drum]
+path = "../ira_drum"
+default-features = false
+features = ["gltf", "glam", "obj"]
 
 [dependencies.wgpu]
 version = "0.20"
@@ -31,6 +35,6 @@ version = "0.30"
 optional = true
 
 [features]
-client = ["dep:wgpu", "dep:winit"]
+client = ["dep:wgpu", "dep:winit", "ira_drum/wgpu"]
 server = []
 

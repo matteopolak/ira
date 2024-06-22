@@ -7,11 +7,15 @@ license = "MIT"
 [dependencies]
 ira.path = "../../ira"
 ira_drum.path = "../../ira_drum"
-basic = { path = "../basic", default-features = false }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[dependencies.basic]
+path = "../basic"
+default-features = false
+optional = true
 
 [features]
 default = ["client"]
-client = ["ira/client", "basic/client"]
-server = ["ira/server", "basic/server"]
+client = ["dep:basic", "ira/client", "basic/client"]
+server = ["ira/server"]
 

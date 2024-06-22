@@ -45,7 +45,7 @@ pub struct PhysicsState {
 	pub broad_phase: DefaultBroadPhase,
 	pub narrow_phase: NarrowPhase,
 
-	pub impulse_joins: ImpulseJointSet,
+	pub impulse_joints: ImpulseJointSet,
 	pub multibody_joints: MultibodyJointSet,
 
 	pub ccd_solver: CCDSolver,
@@ -64,7 +64,7 @@ impl Default for PhysicsState {
 			islands: IslandManager::new(),
 			broad_phase: DefaultBroadPhase::new(),
 			narrow_phase: NarrowPhase::new(),
-			impulse_joins: ImpulseJointSet::new(),
+			impulse_joints: ImpulseJointSet::new(),
 			multibody_joints: MultibodyJointSet::new(),
 			ccd_solver: CCDSolver::new(),
 			rigid_bodies: RigidBodySet::new(),
@@ -87,7 +87,7 @@ impl PhysicsState {
 			&mut self.narrow_phase,
 			&mut self.rigid_bodies,
 			&mut self.colliders,
-			&mut self.impulse_joins,
+			&mut self.impulse_joints,
 			&mut self.multibody_joints,
 			&mut self.ccd_solver,
 			None,
@@ -129,7 +129,16 @@ impl PhysicsState {
 
 			new_instance.body = Body::Rigid(body);
 		} else if let Some(collider) = instance.collider {
-			new_instance.collider = Some(self.colliders.insert(collider.mass(1.0)));
+			let (axis, angle) = instance.rotation.to_axis_angle();
+
+			new_instance.collider = Some(
+				self.colliders.insert(
+					collider
+						.position(instance.position.into())
+						.rotation((axis * angle).into())
+						.mass(1.0),
+				),
+			);
 		}
 
 		new_instance
@@ -179,14 +188,8 @@ impl<Message> Context<Message> {
 			let instance: InstanceHandle = body.user_data.into();
 
 			#[cfg(feature = "client")]
-			{
-				if let Some(model) = instance.resolve_model_mut(&mut self.drum, &self.instances) {
-					model.dirty = true;
-				}
-
-				if let Some(mut pair) = instance.resolve_mut(&mut self.drum, &mut self.instances) {
-					pair.update_gpu(&self.physics);
-				}
+			if let Some(mut pair) = instance.resolve_mut(&mut self.drum, &mut self.instances) {
+				pair.update_gpu(&self.physics);
 			}
 
 			#[cfg(feature = "server")]
@@ -212,6 +215,7 @@ impl<Message> Context<Message> {
 			}
 		}
 
+		#[cfg(feature = "server")]
 		if self.physics.steps_since_last_update >= PhysicsState::TICKS_PER_UPDATE {
 			self.physics.steps_since_last_update = 0;
 		}
@@ -258,7 +262,7 @@ impl<Message> Context<Message> {
 				handle,
 				&mut self.physics.islands,
 				&mut self.physics.colliders,
-				&mut self.physics.impulse_joins,
+				&mut self.physics.impulse_joints,
 				&mut self.physics.multibody_joints,
 				true,
 			);
@@ -332,48 +336,27 @@ impl<Message> Context<Message> {
 		let model = &mut self.drum.models[model_id as usize];
 		let instance_id = model.handles.len() as u32;
 
-		let index = self.instances.insert_with(|handle| {
+		let handle = self.instances.insert_with(|handle| {
 			let (axis, angle) = instance.rotation.to_axis_angle();
 
-			match (instance.rigidbody, instance.collider) {
-				(Some(body), collider) => {
-					instance.collider =
-						collider.or_else(|| Some(model.bounds.to_cuboid(instance.scale).mass(1.0)));
+			instance.collider = instance
+				.collider
+				.or_else(|| Some(model.bounds.to_cuboid(instance.scale).mass(1.0)));
 
-					instance.rigidbody = Some(
-						body.position(instance.position.into())
-							.rotation((axis * angle).into())
-							.user_data(handle.to_u128()),
-					);
-				}
-				(body, Some(collider)) => {
-					instance.rigidbody = body;
-					instance.collider = Some(
-						collider
-							.position(instance.position.into())
-							.rotation((axis * angle).into()),
-					);
-				}
-				(body, None) => {
-					instance.rigidbody = body;
-					instance.collider = Some(
-						model
-							.bounds
-							.to_cuboid(instance.scale)
-							.position(instance.position.into())
-							.rotation((axis * angle).into()),
-					);
-				}
-			}
+			instance.rigidbody = instance.rigidbody.map(|body| {
+				body.position(instance.position.into())
+					.rotation((axis * angle).into())
+					.user_data(handle.to_u128())
+			});
 
 			let instance = self.physics.add_instance(instance, model_id, instance_id);
 
-			model.add_gpu_instance(&instance, &self.physics);
+			model.add_gpu_instance(&instance, InstanceHandle::new(handle), &self.physics);
 
 			instance
 		});
 
-		InstanceHandle::new(index)
+		InstanceHandle::new(handle)
 	}
 }
 

@@ -176,7 +176,6 @@ where
 	///
 	/// Packets received from `packet_rx` are converted into trusted packets, treating
 	/// the local client as an authority.
-	#[allow(clippy::too_many_lines)]
 	pub(crate) fn run_server(mut self, local: CreateInstance)
 	where
 		Message: fmt::Debug,
@@ -213,7 +212,7 @@ where
 			}
 
 			for (client_id, packet) in packets {
-				info!(?packet, "sending packet to other clients");
+				debug!(?packet, "sending packet to other clients");
 
 				packet
 					.write_iter(

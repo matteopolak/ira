@@ -3,7 +3,7 @@ use crate::{
 	packet::{CreateInstance, Packet, TrustedPacket},
 	physics::{InstanceHandle, PhysicsState},
 	server::{self, InstanceId},
-	DrumExt, GpuDrum, Instance, InstanceBuilder,
+	Body, DrumExt, GpuDrum, Instance, InstanceBuilder,
 };
 
 #[cfg(feature = "client")]
@@ -127,9 +127,13 @@ impl<A: App<Message>, Message> Game<A, Message> {
 	where
 		Message: bitcode::Encode + bitcode::DecodeOwned + fmt::Debug + Send + 'static,
 	{
+		use tracing::info;
+
 		let drum = A::on_init();
 		let mut ctx = pollster::block_on(Context::<Message>::new::<A>(drum));
 		let mut app = A::on_ready(&mut ctx);
+
+		info!("starting render loop");
 
 		loop {
 			ctx.render(&mut app);
@@ -176,7 +180,6 @@ pub struct Context<Message = ()> {
 }
 
 impl<Message> Context<Message> {
-	#[allow(clippy::too_many_lines)]
 	async fn new<A: App<Message>>(#[cfg(feature = "client")] window: Window, drum: Drum) -> Self
 	where
 		Message: bitcode::Encode + bitcode::DecodeOwned + fmt::Debug + Send + 'static,
@@ -278,11 +281,7 @@ impl<Message> Context<Message> {
 					return;
 				};
 
-				let Some(handle) = ctx.handles.remove(&instance_id) else {
-					return;
-				};
-
-				ctx.instance_ids.remove(&handle);
+				ctx.remove_instance_local(instance_id);
 			}
 			Packet::CreateInstance { options, id } => {
 				if Some(id) == ctx.instance_id {
@@ -318,6 +317,8 @@ impl<Message> Context<Message> {
 		app: &mut A,
 		#[cfg(feature = "client")] event_loop: &ActiveEventLoop,
 	) {
+		std::hint::spin_loop();
+
 		while let Ok(packet) = self.packet_rx.try_recv() {
 			Self::on_packet::<A>(self, packet);
 		}

@@ -339,7 +339,6 @@ pub async fn request_adapter(
 		.expect("failed to find an appropriate adapter")
 }
 
-#[allow(clippy::too_many_arguments)]
 pub fn create_pbr_render_pipelines(
 	device: &wgpu::Device,
 	material_bind_group_layout: &wgpu::BindGroupLayout,

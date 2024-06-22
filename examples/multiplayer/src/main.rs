@@ -8,12 +8,12 @@ use std::{
 use ira::{
 	glam::{Quat, Vec3},
 	physics::InstanceHandle,
-	winit::error::EventLoopError,
 	Context, Game, Instance, RigidBodyBuilder,
 };
 use ira_drum::Drum;
 
 struct App {
+	#[cfg(feature = "client")]
 	player: basic::Player,
 	cars: Vec<InstanceHandle>,
 
@@ -70,6 +70,7 @@ impl ira::App for App {
 				.scale(Vec3::new(100.0, 1.0, 100.0)),
 		);
 
+		#[cfg(feature = "client")]
 		let body_collider = ctx.add_rigidbody(
 			RigidBodyBuilder::dynamic().lock_rotations(),
 			ctx.drum
@@ -81,6 +82,7 @@ impl ira::App for App {
 		);
 
 		Self {
+			#[cfg(feature = "client")]
 			player: basic::Player::new(Instance::from(body_collider)),
 			cars,
 			last_car_spawn: Instant::now(),
@@ -88,39 +90,17 @@ impl ira::App for App {
 	}
 
 	fn on_fixed_update(&mut self, ctx: &mut Context) {
+		#[cfg(feature = "client")]
 		self.player.on_fixed_update(ctx);
-
-		#[cfg(feature = "server")]
-		if self.last_car_spawn.elapsed() > Duration::from_secs(1) {
-			self.last_car_spawn = Instant::now();
-
-			let car_id = ctx.drum.model_id("bottled_car").unwrap();
-			let car = ctx.add_instance(
-				car_id,
-				Instance::builder()
-					.up(Vec3::Z)
-					.rotation(Quat::from_rotation_x(FRAC_PI_4))
-					.position(Vec3::new(0.0, 10.0, 0.0))
-					.scale(Vec3::splat(5.0))
-					.rigidbody(RigidBodyBuilder::dynamic()),
-			);
-
-			self.cars.push(car);
-		}
 	}
 
 	fn on_update(&mut self, ctx: &mut Context, delta: Duration) {
+		#[cfg(feature = "client")]
 		self.player.on_update(ctx, delta);
-
-		/*for car in &mut self.cars {
-			car.update(ctx, |i, p| {
-				i.rotate_y(p, 0.01);
-			});
-		}*/
 	}
 }
 
-fn main() -> Result<(), EventLoopError> {
+fn main() -> Result<(), ira::game::Error> {
 	tracing_subscriber::fmt::init();
 
 	Game::<App>::default().run()

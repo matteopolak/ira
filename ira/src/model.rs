@@ -22,7 +22,6 @@ pub struct GpuModel {
 	#[cfg(feature = "client")]
 	pub(crate) instance_buffer: wgpu::Buffer,
 
-	// INVARIANT: instances.len() == handles.len()
 	#[cfg(feature = "client")]
 	pub(crate) instances: Vec<GpuInstance>,
 	pub(crate) handles: Vec<InstanceHandle>,
@@ -62,9 +61,15 @@ impl GpuModel {
 		}
 	}
 
-	pub fn add_gpu_instance(&mut self, instance: &Instance, physics: &PhysicsState) {
+	pub fn add_gpu_instance(
+		&mut self,
+		instance: &Instance,
+		handle: InstanceHandle,
+		physics: &PhysicsState,
+	) {
 		#[cfg(feature = "client")]
 		self.instances.push(instance.to_gpu(physics));
+		self.handles.push(handle);
 	}
 
 	#[must_use]

@@ -9,7 +9,7 @@ ira.path = "../../ira"
 ira_drum.path = "../../ira_drum"
 
 [features]
-default = ["client", "server"]
+default = []
 client = ["ira/client"]
 server = ["ira/server"]
 

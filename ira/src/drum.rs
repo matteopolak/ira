@@ -1,11 +1,11 @@
 use ira_drum::Handle;
 
-use crate::{GpuMesh, GpuModel, ModelExt};
+use crate::{GpuMesh, GpuModel, MeshExt, ModelExt};
 
 #[cfg(feature = "client")]
 use crate::render::texture::{GpuTexture, GpuTextureCollection, TextureExt};
 #[cfg(feature = "client")]
-use crate::{GpuMaterial, MaterialExt, MeshExt};
+use crate::{GpuMaterial, MaterialExt};
 
 #[derive(Debug, Default)]
 pub struct GpuDrum {
@@ -74,9 +74,18 @@ impl DrumExt for ira_drum::Drum {
 			drum.materials = IntoIterator::into_iter(self.materials)
 				.map(|m| m.into_gpu(device, queue, &mut drum))
 				.collect();
-
-			drum.meshes = self.meshes.iter().map(|m| m.to_gpu(device)).collect();
 		}
+
+		drum.meshes = self
+			.meshes
+			.iter()
+			.map(|m| {
+				m.to_gpu(
+					#[cfg(feature = "client")]
+					device,
+				)
+			})
+			.collect();
 
 		drum.models = IntoIterator::into_iter(self.models)
 			.map(|m| {
