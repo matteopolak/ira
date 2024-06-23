@@ -10,13 +10,13 @@ use crate::{
 
 use super::Server;
 
-impl<Message> Server<Message>
+impl<M> Server<M>
 where
-	Message: bitcode::DecodeOwned + bitcode::Encode,
+	M: bitcode::DecodeOwned + bitcode::Encode,
 {
-	pub(crate) fn run_client<A: App<Message>>(self)
+	pub(crate) fn run_client<A: App<M>>(self)
 	where
-		Message: fmt::Debug,
+		M: fmt::Debug,
 	{
 		let stream = A::connect();
 		let addr = stream.peer_addr().unwrap();
@@ -26,7 +26,7 @@ where
 		let mut client = Client::new(stream, ClientId::SERVER);
 
 		// get client id
-		let packet = TrustedPacket::<Message>::read(&mut client).unwrap();
+		let packet = TrustedPacket::<M>::read(&mut client).unwrap();
 		let Packet::Connected { instance_id } = packet.inner else {
 			panic!("expected SetClientId packet, got {packet:?}");
 		};

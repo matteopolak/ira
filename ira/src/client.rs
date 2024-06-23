@@ -128,13 +128,13 @@ impl Client {
 	/// # Errors
 	///
 	/// See [`Packet::read`].
-	pub fn try_read_packet<Message>(
+	pub fn try_read_packet<M>(
 		&mut self,
 		next_instance_id: &AtomicU32,
 		owners: &mut Owners,
-	) -> Result<Option<Packet<Message>>, packet::Error>
+	) -> Result<Option<Packet<M>>, packet::Error>
 	where
-		Message: bitcode::DecodeOwned + bitcode::Encode,
+		M: bitcode::DecodeOwned + bitcode::Encode,
 	{
 		let packet = Packet::read(self)?;
 

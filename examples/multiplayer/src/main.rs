@@ -6,7 +6,9 @@ use std::{
 };
 
 use ira::{
+	extra::ratelimit::Ratelimit,
 	glam::{Quat, Vec3},
+	packet::{Packet, TrustedPacket},
 	physics::InstanceHandle,
 	ColliderBuilder, Context, Game, Instance, RigidBodyBuilder,
 };
@@ -17,10 +19,16 @@ struct App {
 	player: basic::Player,
 	cars: Vec<InstanceHandle>,
 
-	last_car_spawn: Instant,
+	car_spawn: Ratelimit,
+	hello: Ratelimit,
 }
 
-impl ira::App for App {
+#[derive(Debug, bitcode::Encode, bitcode::Decode)]
+enum Message {
+	Hello,
+}
+
+impl ira::App<Message> for App {
 	fn listen() -> std::net::TcpListener {
 		std::net::TcpListener::bind("0.0.0.0:10585").unwrap()
 	}
@@ -29,7 +37,7 @@ impl ira::App for App {
 		std::net::TcpStream::connect(std::env::args().nth(1).unwrap()).unwrap()
 	}
 
-	fn create_player(ctx: &mut Context) -> (u32, ira::InstanceBuilder) {
+	fn create_player(ctx: &mut Context<Message>) -> (u32, ira::InstanceBuilder) {
 		(
 			2,
 			ira::Instance::builder()
@@ -50,7 +58,20 @@ impl ira::App for App {
 		Drum::from_path("car.drum").unwrap()
 	}
 
-	fn on_ready(ctx: &mut Context) -> Self {
+	fn on_packet(ctx: &mut Context<Message>, packet: TrustedPacket<Message>) {
+		let client_id = packet.client_id;
+		let Packet::Custom(message) = packet.inner else {
+			return;
+		};
+
+		match message {
+			Message::Hello => {
+				println!("Hello from {client_id:?}");
+			}
+		}
+	}
+
+	fn on_ready(ctx: &mut Context<Message>) -> Self {
 		let car_id = ctx.drum.model_id("bottled_car").unwrap();
 
 		#[cfg(feature = "server")]
@@ -92,24 +113,22 @@ impl ira::App for App {
 			#[cfg(feature = "client")]
 			player: basic::Player::new(Instance::from(body_collider)),
 			cars,
-			last_car_spawn: Instant::now(),
+			car_spawn: Ratelimit::new(Duration::from_secs(1)),
+			hello: Ratelimit::new(Duration::from_millis(500)),
 		}
 	}
 
-	fn on_fixed_update(&mut self, ctx: &mut Context) {
+	fn on_fixed_update(&mut self, ctx: &mut Context<Message>) {
 		#[cfg(feature = "client")]
 		self.player.on_fixed_update(ctx);
 	}
 
-	fn on_update(&mut self, ctx: &mut Context, delta: Duration) {
+	fn on_update(&mut self, ctx: &mut Context<Message>, delta: Duration) {
 		#[cfg(feature = "client")]
 		self.player.on_update(ctx, delta);
 
 		#[cfg(feature = "client")]
-		if ctx.pressed(ira::KeyCode::KeyC) && self.last_car_spawn.elapsed() > Duration::from_secs(1)
-		{
-			self.last_car_spawn = Instant::now();
-
+		if ctx.pressed(ira::KeyCode::KeyC) && self.car_spawn.check() {
 			let car_id = ctx.drum.model_id("bottled_car").unwrap();
 
 			ctx.add_instance(
@@ -122,11 +141,16 @@ impl ira::App for App {
 					.rigidbody(RigidBodyBuilder::dynamic()),
 			);
 		}
+
+		#[cfg(feature = "client")]
+		if ctx.pressed(ira::KeyCode::KeyH) && self.hello.check() {
+			ctx.send_packet(Packet::new(Message::Hello));
+		}
 	}
 }
 
 fn main() -> Result<(), ira::game::Error> {
 	tracing_subscriber::fmt::init();
 
-	Game::<App>::default().run()
+	Game::<App, Message>::default().run()
 }

@@ -34,7 +34,7 @@ impl Player {
 		}
 	}
 
-	pub fn on_update(&mut self, ctx: &mut Context, delta: Duration) {
+	pub fn on_update<M>(&mut self, ctx: &mut Context<M>, delta: Duration) {
 		self.camera.on_update(ctx, delta);
 
 		let delta = delta.as_secs_f32();
@@ -72,7 +72,7 @@ impl Player {
 		);
 	}
 
-	pub fn on_fixed_update(&mut self, ctx: &mut Context) {
+	pub fn on_fixed_update<M>(&mut self, ctx: &mut Context<M>) {
 		let delta_pos = mem::take(&mut self.d_position);
 
 		let (pos, _) = self.instance.body.pos_rot(&ctx.physics);

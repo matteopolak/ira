@@ -30,7 +30,7 @@ impl From<bitcode::Error> for Error {
 }
 
 #[derive(Debug, bitcode::Encode, bitcode::Decode)]
-pub enum Packet<Message> {
+pub enum Packet<M> {
 	/// An instance has been created.
 	CreateInstance {
 		options: CreateInstance,
@@ -51,17 +51,17 @@ pub enum Packet<Message> {
 	/// A client has disconnected.
 	DeleteClient,
 	/// A custom message (application-defined)
-	Custom(Message),
+	Custom(M),
 }
 
-impl<Message> Packet<Message> {
+impl<M> Packet<M> {
 	/// Creates a new packet with custom message.
-	pub fn new(message: Message) -> Self {
+	pub fn new(message: M) -> Self {
 		Self::Custom(message)
 	}
 
 	/// Wraps this packet in a [`TrustedPacket`] with the given client id.
-	pub fn into_trusted(self, client_id: ClientId) -> TrustedPacket<Message> {
+	pub fn into_trusted(self, client_id: ClientId) -> TrustedPacket<M> {
 		TrustedPacket {
 			client_id,
 			inner: self,
@@ -75,7 +75,7 @@ impl<Message> Packet<Message> {
 	/// See [`bitcode::Error`] and [`io::Error`] for more information.
 	pub fn read(client: &mut Client) -> Result<Self, Error>
 	where
-		Message: bitcode::DecodeOwned,
+		M: bitcode::DecodeOwned,
 	{
 		read(client)
 	}
@@ -90,7 +90,7 @@ impl<Message> Packet<Message> {
 		writer: impl IntoIterator<Item = &'w mut W>,
 	) -> io::Result<()>
 	where
-		Message: bitcode::Encode,
+		M: bitcode::Encode,
 	{
 		let data = bitcode::encode(self);
 		let len = (data.len() as u32).to_le_bytes();
@@ -110,7 +110,7 @@ impl<Message> Packet<Message> {
 	/// See [`bitcode::Error`] and [`io::Error`] for more information.
 	pub fn write<W: Write>(&self, writer: &mut W) -> io::Result<()>
 	where
-		Message: bitcode::Encode,
+		M: bitcode::Encode,
 	{
 		let data = bitcode::encode(self);
 		let len = (data.len() as u32).to_le_bytes();
@@ -122,12 +122,12 @@ impl<Message> Packet<Message> {
 
 // packet with client id
 #[derive(Debug, bitcode::Encode, bitcode::Decode)]
-pub struct TrustedPacket<Message> {
+pub struct TrustedPacket<M> {
 	pub client_id: ClientId,
-	pub inner: Packet<Message>,
+	pub inner: Packet<M>,
 }
 
-impl<Message> TrustedPacket<Message> {
+impl<M> TrustedPacket<M> {
 	/// Reads a packet from a reader.
 	///
 	/// # Errors
@@ -135,7 +135,7 @@ impl<Message> TrustedPacket<Message> {
 	/// See [`bitcode::Error`] and [`io::Error`] for more information.
 	pub fn read(client: &mut Client) -> Result<Self, Error>
 	where
-		Message: bitcode::DecodeOwned,
+		M: bitcode::DecodeOwned,
 	{
 		read(client)
 	}
@@ -147,7 +147,7 @@ impl<Message> TrustedPacket<Message> {
 	/// See [`bitcode::Error`] and [`io::Error`] for more information.
 	pub fn write_iter<'w>(&self, writer: impl IntoIterator<Item = &'w mut Client>) -> io::Result<()>
 	where
-		Message: bitcode::Encode,
+		M: bitcode::Encode,
 	{
 		let data = bitcode::encode(self);
 		let len = (data.len() as u32).to_le_bytes();
@@ -167,7 +167,7 @@ impl<Message> TrustedPacket<Message> {
 	/// See [`bitcode::Error`] and [`io::Error`] for more information.
 	pub fn write(&self, writer: &mut Client) -> io::Result<()>
 	where
-		Message: bitcode::Encode,
+		M: bitcode::Encode,
 	{
 		let data = bitcode::encode(self);
 		let len = (data.len() as u32).to_le_bytes();
@@ -187,7 +187,7 @@ where
 }
 
 /// A packet for creating a new collider.
-#[derive(Debug, Clone, bitcode::Encode, bitcode::Decode)]
+#[derive(Debug, Clone, Copy, bitcode::Encode, bitcode::Decode)]
 pub enum CreateCollider {
 	Cuboid {
 		half_extents: Vec3,
@@ -261,7 +261,7 @@ impl CreateCollider {
 	}
 }
 
-#[derive(Debug, Clone, bitcode::Encode, bitcode::Decode)]
+#[derive(Debug, Clone, Copy, bitcode::Encode, bitcode::Decode)]
 pub enum CreateBody {
 	Static,
 	Rigid {
@@ -282,7 +282,7 @@ pub struct CreateInstance {
 	pub collider: Option<CreateCollider>,
 }
 
-#[derive(Debug, Clone, bitcode::Encode, bitcode::Decode)]
+#[derive(Debug, Clone, Copy, bitcode::Encode, bitcode::Decode)]
 pub enum RigidBodyType {
 	Dynamic = 0,
 	Fixed = 1,
@@ -349,7 +349,7 @@ impl CreateInstance {
 		}
 	}
 
-	pub fn into_builder(self) -> InstanceBuilder {
+	pub fn to_builder(&self) -> InstanceBuilder {
 		let instance = Instance::builder()
 			.position(self.position)
 			.rotation(self.rotation)

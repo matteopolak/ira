@@ -1543,6 +1543,7 @@ name = "multiplayer"
 version = "0.0.0"
 dependencies = [
  "basic",
+ "bitcode",
  "ira",
  "ira_drum",
  "tracing-subscriber",

@@ -10,12 +10,12 @@ use crate::{
 
 use super::{InstanceId, Server};
 
-impl<Message> Server<Message>
+impl<M> Server<M>
 where
-	Message: bitcode::DecodeOwned + bitcode::Encode,
+	M: bitcode::DecodeOwned + bitcode::Encode,
 {
 	/// Spawns a new thread to listen for incoming connections.
-	pub(crate) fn run_listener<A: App<Message>>(&self) {
+	pub(crate) fn run_listener<A: App<M>>(&self) {
 		let listener = A::listen();
 		let addr = listener.local_addr().unwrap();
 
@@ -36,9 +36,9 @@ where
 		});
 	}
 
-	fn broadcast(&mut self, packet: &TrustedPacket<Message>)
+	fn broadcast(&mut self, packet: &TrustedPacket<M>)
 	where
-		Message: fmt::Debug,
+		M: fmt::Debug,
 	{
 		debug!(?packet, "sending packet to clients");
 
@@ -51,20 +51,20 @@ where
 
 	fn process_new_connections(&mut self)
 	where
-		Message: fmt::Debug,
+		M: fmt::Debug,
 	{
 		while let Ok(mut client) = self.client_rx.try_recv() {
 			let instance_id = self.next_instance_id();
 
 			info!(client_id = ?client.id(), "client connected");
 
-			Packet::<Message>::Connected { instance_id }
+			Packet::<M>::Connected { instance_id }
 				.into_trusted(client.id())
 				.write(&mut client)
 				.unwrap();
 
 			// send packets to clients to announce new client
-			let create = Packet::<Message>::CreateClient { instance_id }.into_trusted(client.id());
+			let create = Packet::<M>::CreateClient { instance_id }.into_trusted(client.id());
 
 			self.broadcast(&create);
 			self.packet_tx.send(create).unwrap();
@@ -73,7 +73,7 @@ where
 			let packets = self
 				.instances
 				.iter()
-				.map(|(id, options)| Packet::<Message>::CreateInstance {
+				.map(|(id, options)| Packet::<M>::CreateInstance {
 					id: *id,
 					options: options.clone(),
 				})
@@ -92,51 +92,41 @@ where
 
 	fn process_local_packets(&mut self, client_id: ClientId)
 	where
-		Message: fmt::Debug,
+		M: fmt::Debug,
 	{
 		while let Ok(packet) = self.packet_rx.try_recv() {
-			match packet {
+			match &packet {
 				Packet::CreateInstance { options, id } => {
-					self.instances.insert(id, options.clone());
-
-					self.owners.insert(id, client_id);
-					self.broadcast(&Packet::CreateInstance { options, id }.into_trusted(client_id));
+					self.instances.insert(*id, options.clone());
+					self.owners.insert(*id, client_id);
 				}
 				Packet::DeleteInstance { id } => {
 					self.instances.remove(&id);
-
 					self.owners.remove(&id);
-					self.broadcast(&Packet::DeleteInstance { id }.into_trusted(client_id));
 				}
 				Packet::UpdateInstance { id, delta } => {
 					if let Some(instance) = self.instances.get_mut(&id) {
 						instance.apply(&delta);
 					};
-
-					self.broadcast(&Packet::UpdateInstance { id, delta }.into_trusted(client_id));
-				}
-				Packet::CreateClient { instance_id } => {
-					self.broadcast(&Packet::CreateClient { instance_id }.into_trusted(client_id));
 				}
 				Packet::DeleteClient => {
 					self.owners.retain(|_, owner| *owner != client_id);
-
-					self.broadcast(&Packet::DeleteClient.into_trusted(client_id));
 				}
-				Packet::Custom(message) => {
-					self.broadcast(&Packet::Custom(message).into_trusted(client_id));
-				}
+				Packet::Custom(..) | Packet::CreateClient { .. } => {}
 				Packet::Connected { .. } => {
 					warn!("received Connected packet from client");
+					continue;
 				}
 			}
+
+			self.broadcast(&packet.into_trusted(client_id));
 		}
 	}
 
 	/// Processes local packets and returns the (disconnected clients, (packet owner, packets to send to clients)).
-	fn process_remote_packets(&mut self) -> (Vec<ClientId>, Vec<(ClientId, TrustedPacket<Message>)>)
+	fn process_remote_packets(&mut self) -> (Vec<ClientId>, Vec<(ClientId, TrustedPacket<M>)>)
 	where
-		Message: fmt::Debug,
+		M: fmt::Debug,
 	{
 		let mut disconnected = Vec::new();
 		let mut packets = Vec::new();
@@ -227,7 +217,7 @@ where
 	/// the local client as an authority.
 	pub(crate) fn run_server(mut self, local: CreateInstance)
 	where
-		Message: fmt::Debug,
+		M: fmt::Debug,
 	{
 		let client_id = ClientId::SERVER;
 
@@ -236,7 +226,7 @@ where
 			let instance_id = self.next_instance_id();
 
 			self.packet_tx
-				.send(Packet::<Message>::Connected { instance_id }.into_trusted(client_id))
+				.send(Packet::<M>::Connected { instance_id }.into_trusted(client_id))
 				.unwrap();
 
 			self.instances.insert(instance_id, local);

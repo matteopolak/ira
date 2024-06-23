@@ -35,7 +35,7 @@ use winit::{
 ///
 /// For networked games, implement the [`Network`] trait as well.
 #[allow(unused_variables)]
-pub trait App<Message = ()> {
+pub trait App<M = ()> {
 	/// Connects to the server. This is only called on clients.
 	#[must_use]
 	fn connect() -> std::net::TcpStream {
@@ -50,29 +50,29 @@ pub trait App<Message = ()> {
 
 	/// Called when a remote player joins the game. This should return
 	/// the model id, and a builder for the instance.
-	fn create_player(ctx: &mut Context<Message>) -> (u32, InstanceBuilder);
+	fn create_player(ctx: &mut Context<M>) -> (u32, InstanceBuilder);
 
-	/// Called when a custom message is received from the server.
-	fn on_message(ctx: &mut Context<Message>, message: Message) {}
+	/// Called when a packet is received from the server.
+	fn on_packet(ctx: &mut Context<M>, packet: TrustedPacket<M>) {}
 	/// Called once at the start of the program, right after the window
 	/// is created but before anything else is done.
 	fn on_init() -> Drum;
 	/// Called once when everything has been created on the GPU.
-	fn on_ready(ctx: &mut Context<Message>) -> Self;
+	fn on_ready(ctx: &mut Context<M>) -> Self;
 	/// Called once per frame, right before rendering. Note that this
 	/// will not be called if the `render` feature is not enabled.
-	fn on_update(&mut self, ctx: &mut Context<Message>, delta: Duration) {}
+	fn on_update(&mut self, ctx: &mut Context<M>, delta: Duration) {}
 	/// Called every 1/60th of a second. If queued at the same time as an update,
 	/// this will always be called first.
-	fn on_fixed_update(&mut self, ctx: &mut Context<Message>) {}
+	fn on_fixed_update(&mut self, ctx: &mut Context<M>) {}
 }
 
 /// A game instance.
 ///
 /// [`A`] is the application type (that implements [`App`]).
-/// [`Message`] is the custom message that can be sent between the client and server.
-pub struct Game<A, Message = ()> {
-	state: Option<(Context<Message>, A)>,
+/// [`M`] is the custom message that can be sent between the client and server.
+pub struct Game<A, M = ()> {
+	state: Option<(Context<M>, A)>,
 }
 
 #[derive(Debug)]
@@ -89,13 +89,13 @@ impl From<EventLoopError> for Error {
 	}
 }
 
-impl<A, Message> Default for Game<A, Message> {
+impl<A, M> Default for Game<A, M> {
 	fn default() -> Self {
 		Self { state: None }
 	}
 }
 
-impl<A: App<Message>, Message> Game<A, Message> {
+impl<A: App<M>, M> Game<A, M> {
 	/// Runs the application.
 	///
 	/// This function will block the current thread until the application is closed.
@@ -106,7 +106,7 @@ impl<A: App<Message>, Message> Game<A, Message> {
 	#[cfg(feature = "client")]
 	pub fn run(mut self) -> Result<(), Error>
 	where
-		Message: bitcode::Encode + bitcode::DecodeOwned + fmt::Debug + Send + 'static,
+		M: bitcode::Encode + bitcode::DecodeOwned + fmt::Debug + Send + 'static,
 	{
 		let event_loop = EventLoop::new()?;
 
@@ -126,12 +126,12 @@ impl<A: App<Message>, Message> Game<A, Message> {
 	#[cfg(not(feature = "client"))]
 	pub fn run(self) -> Result<(), Error>
 	where
-		Message: bitcode::Encode + bitcode::DecodeOwned + fmt::Debug + Send + 'static,
+		M: bitcode::Encode + bitcode::DecodeOwned + fmt::Debug + Send + 'static,
 	{
 		use tracing::info;
 
 		let drum = A::on_init();
-		let mut ctx = pollster::block_on(Context::<Message>::new::<A>(drum));
+		let mut ctx = pollster::block_on(Context::<M>::new::<A>(drum));
 		let mut app = A::on_ready(&mut ctx);
 
 		info!("starting render loop");
@@ -143,7 +143,7 @@ impl<A: App<Message>, Message> Game<A, Message> {
 }
 
 /// The game context, containing all game-related data.
-pub struct Context<Message = ()> {
+pub struct Context<M = ()> {
 	last_frame: time::Instant,
 	last_physics: time::Instant,
 
@@ -166,10 +166,10 @@ pub struct Context<Message = ()> {
 
 	/// Used to send messages to the thread that communicates with the server.
 	/// If the "server" feature is enabled, this will be directly to the server.
-	pub(crate) packet_tx: mpsc::Sender<Packet<Message>>,
+	pub(crate) packet_tx: mpsc::Sender<Packet<M>>,
 	/// Used to receive messages from the thread that communicates with the server.
 	/// If the "server" feature is enabled, this will be directly from the server.
-	pub(crate) packet_rx: mpsc::Receiver<TrustedPacket<Message>>,
+	pub(crate) packet_rx: mpsc::Receiver<TrustedPacket<M>>,
 
 	pub(crate) next_instance_id: Arc<AtomicU32>,
 	pub client_id: Option<ClientId>,
@@ -180,10 +180,10 @@ pub struct Context<Message = ()> {
 	pub render: RenderState,
 }
 
-impl<Message> Context<Message> {
-	async fn new<A: App<Message>>(#[cfg(feature = "client")] window: Window, drum: Drum) -> Self
+impl<M> Context<M> {
+	async fn new<A: App<M>>(#[cfg(feature = "client")] window: Window, drum: Drum) -> Self
 	where
-		Message: bitcode::Encode + bitcode::DecodeOwned + fmt::Debug + Send + 'static,
+		M: bitcode::Encode + bitcode::DecodeOwned + fmt::Debug + Send + 'static,
 	{
 		#[cfg(feature = "client")]
 		let render = RenderState::new(window, &drum).await;
@@ -263,12 +263,12 @@ impl<Message> Context<Message> {
 	}
 }
 
-impl<Message> Context<Message> {
-	fn on_packet<A: App<Message>>(ctx: &mut Context<Message>, packet: TrustedPacket<Message>) {
+impl<M> Context<M> {
+	fn on_packet<A: App<M>>(ctx: &mut Context<M>, packet: TrustedPacket<M>) {
 		let client_id = packet.client_id;
 
 		match packet.inner {
-			Packet::Custom(message) => A::on_message(ctx, message),
+			Packet::Custom(..) => {}
 			Packet::CreateClient { instance_id } => {
 				let (model_id, instance) = A::create_player(ctx);
 				let instance = ctx.add_instance_local(model_id, instance);
@@ -284,14 +284,14 @@ impl<Message> Context<Message> {
 
 				ctx.remove_instance_local(instance_id);
 			}
-			Packet::CreateInstance { options, id } => {
+			Packet::CreateInstance { ref options, id } => {
 				info!("creating instance {id:?} with options {options:?}");
 
 				if Some(id) == ctx.instance_id {
 					return;
 				}
 
-				let instance = ctx.add_instance_local(options.model_id, options.into_builder());
+				let instance = ctx.add_instance_local(options.model_id, options.to_builder());
 
 				ctx.handles.insert(id, instance);
 				ctx.instance_ids.insert(instance, id);
@@ -299,7 +299,7 @@ impl<Message> Context<Message> {
 			Packet::DeleteInstance { id } => {
 				ctx.remove_instance_local(id);
 			}
-			Packet::UpdateInstance { id, delta } => {
+			Packet::UpdateInstance { id, ref delta } => {
 				let Some(&mut instance) = ctx.handles.get_mut(&id) else {
 					return;
 				};
@@ -313,9 +313,11 @@ impl<Message> Context<Message> {
 				ctx.instance_id = Some(instance_id);
 			}
 		}
+
+		A::on_packet(ctx, packet);
 	}
 
-	fn render<A: App<Message>>(
+	fn render<A: App<M>>(
 		&mut self,
 		app: &mut A,
 		#[cfg(feature = "client")] event_loop: &ActiveEventLoop,
@@ -369,9 +371,9 @@ impl<Message> Context<Message> {
 }
 
 #[cfg(feature = "client")]
-impl<A: App<Message>, Message> ApplicationHandler for Game<A, Message>
+impl<A: App<M>, M> ApplicationHandler for Game<A, M>
 where
-	Message: bitcode::Encode + bitcode::DecodeOwned + fmt::Debug + Send + 'static,
+	M: bitcode::Encode + bitcode::DecodeOwned + fmt::Debug + Send + 'static,
 {
 	fn resumed(&mut self, event_loop: &ActiveEventLoop) {
 		let window = event_loop
@@ -387,7 +389,7 @@ where
 		window.set_cursor_visible(false);
 
 		let drum = A::on_init();
-		let mut ctx = pollster::block_on(Context::<Message>::new::<A>(window, drum));
+		let mut ctx = pollster::block_on(Context::<M>::new::<A>(window, drum));
 		let app = A::on_ready(&mut ctx);
 
 		self.state = Some((ctx, app));

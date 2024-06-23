@@ -5,6 +5,7 @@ authors = ["Matthew Polak <git@matteopolak.com>"]
 license = "MIT"
 
 [dependencies]
+bitcode = "0.6"
 ira.path = "../../ira"
 ira_drum.path = "../../ira_drum"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

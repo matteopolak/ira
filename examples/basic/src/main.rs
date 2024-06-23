@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use ira::{glam::Vec3, winit::error::EventLoopError, Context, Game, Instance, RigidBodyBuilder};
+use ira::{glam::Vec3, Context, Game, Instance, RigidBodyBuilder};
 use ira_drum::Drum;
 
 struct App {
@@ -48,6 +48,6 @@ impl ira::App for App {
 	}
 }
 
-fn main() -> Result<(), EventLoopError> {
+fn main() -> Result<(), ira::game::Error> {
 	Game::<App>::default().run()
 }

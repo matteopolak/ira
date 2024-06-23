@@ -165,7 +165,7 @@ impl IndexExt for Index {
 	}
 }
 
-impl<Message> Context<Message> {
+impl<M> Context<M> {
 	pub fn physics_update(&mut self) {
 		self.physics.step();
 		self.physics.steps_since_last_update += 1;
@@ -493,7 +493,7 @@ impl InstanceHandle {
 	///   instance.rotate_y(physics, 0.1);
 	/// });
 	/// ```
-	pub fn update<F, Message>(&self, ctx: &mut Context<Message>, update: F)
+	pub fn update<F, M>(&self, ctx: &mut Context<M>, update: F)
 	where
 		F: FnOnce(&mut Instance, &mut PhysicsState),
 	{

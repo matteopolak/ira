@@ -3,7 +3,6 @@ use std::{f32::consts::FRAC_PI_4, time::Duration};
 use ira::{
 	glam::{Quat, Vec3},
 	physics::InstanceHandle,
-	winit::error::EventLoopError,
 	Context, Game, Instance, KeyCode, RigidBodyBuilder,
 };
 use ira_drum::Drum;
@@ -85,6 +84,6 @@ impl ira::App for App {
 	}
 }
 
-fn main() -> Result<(), EventLoopError> {
+fn main() -> Result<(), ira::game::Error> {
 	Game::<App>::default().run()
 }

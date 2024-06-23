@@ -18,9 +18,9 @@ use crate::{
 pub type Owners = BTreeMap<InstanceId, ClientId>;
 
 /// Hosts a server that can be connected to by clients.
-struct Server<Message> {
-	packet_rx: mpsc::Receiver<Packet<Message>>,
-	packet_tx: mpsc::Sender<TrustedPacket<Message>>,
+struct Server<M> {
+	packet_rx: mpsc::Receiver<Packet<M>>,
+	packet_tx: mpsc::Sender<TrustedPacket<M>>,
 
 	client_tx: mpsc::Sender<Client>,
 	client_rx: mpsc::Receiver<Client>,
@@ -34,10 +34,10 @@ struct Server<Message> {
 	next_instance_id: Arc<AtomicU32>,
 }
 
-impl<Message> Server<Message> {
+impl<M> Server<M> {
 	pub(crate) fn new(
-		packet_rx: mpsc::Receiver<Packet<Message>>,
-		packet_tx: mpsc::Sender<TrustedPacket<Message>>,
+		packet_rx: mpsc::Receiver<Packet<M>>,
+		packet_tx: mpsc::Sender<TrustedPacket<M>>,
 		client_tx: mpsc::Sender<Client>,
 		client_rx: mpsc::Receiver<Client>,
 		next_instance_id: Arc<AtomicU32>,
@@ -55,14 +55,14 @@ impl<Message> Server<Message> {
 	}
 }
 
-impl<Message> Context<Message> {
+impl<M> Context<M> {
 	/// Sends a packet to the server.
 	///
 	/// # Panics
 	///
 	/// Panics if the packet channel has closed, which will only happen if the
 	/// communication with the server has failed.
-	pub fn send_packet(&self, packet: Packet<Message>) {
+	pub fn send_packet(&self, packet: Packet<M>) {
 		self.packet_tx.send(packet).unwrap();
 	}
 }
@@ -79,13 +79,13 @@ impl InstanceId {
 	}
 }
 
-pub fn run<A: App<Message>, Message>(
-	packet_tx: mpsc::Sender<TrustedPacket<Message>>,
-	packet_rx: mpsc::Receiver<Packet<Message>>,
+pub fn run<A: App<M>, M>(
+	packet_tx: mpsc::Sender<TrustedPacket<M>>,
+	packet_rx: mpsc::Receiver<Packet<M>>,
 	next_instance_id: Arc<AtomicU32>,
 	local: CreateInstance,
 ) where
-	Message: bitcode::DecodeOwned + bitcode::Encode + fmt::Debug,
+	M: bitcode::DecodeOwned + bitcode::Encode + fmt::Debug,
 {
 	let (client_tx, client_rx) = mpsc::channel();
 	let state = Server::new(packet_rx, packet_tx, client_tx, client_rx, next_instance_id);
