@@ -46,7 +46,7 @@ impl RenderState {
 
 		let config = wgpu::SurfaceConfiguration {
 			usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-			format: wgpu::TextureFormat::Rgba8UnormSrgb,
+			format: wgpu::TextureFormat::Bgra8UnormSrgb,
 			width: size.width,
 			height: size.height,
 			desired_maximum_frame_latency: 2,
@@ -367,7 +367,7 @@ pub fn create_pbr_render_pipelines(
 		device,
 		&pipeline_layout,
 		wgpu::ColorTargetState {
-			format: wgpu::TextureFormat::Rgba8UnormSrgb,
+			format: wgpu::TextureFormat::Bgra8UnormSrgb,
 			blend: None,
 			write_mask: wgpu::ColorWrites::ALL,
 		},
@@ -378,7 +378,7 @@ pub fn create_pbr_render_pipelines(
 
 	let transparent_render_pipeline = {
 		let transparent_target = wgpu::ColorTargetState {
-			format: wgpu::TextureFormat::Rgba8UnormSrgb,
+			format: wgpu::TextureFormat::Bgra8UnormSrgb,
 			blend: Some(wgpu::BlendState {
 				color: wgpu::BlendComponent {
 					src_factor: wgpu::BlendFactor::SrcAlpha,

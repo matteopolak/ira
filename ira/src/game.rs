@@ -385,7 +385,7 @@ where
 			))
 			.unwrap();
 
-		window.set_cursor_grab(CursorGrabMode::Locked).unwrap();
+		let _ = window.set_cursor_grab(CursorGrabMode::Locked);
 		window.set_cursor_visible(false);
 
 		let drum = A::on_init();
