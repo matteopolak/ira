@@ -21,6 +21,14 @@ struct App {
 }
 
 impl ira::App for App {
+	fn listen() -> std::net::TcpListener {
+		std::net::TcpListener::bind("0.0.0.0:10585").unwrap()
+	}
+
+	fn connect() -> std::net::TcpStream {
+		std::net::TcpStream::connect(std::env::args().nth(1).unwrap()).unwrap()
+	}
+
 	fn create_player(ctx: &mut Context) -> (u32, ira::InstanceBuilder) {
 		(
 			2,
