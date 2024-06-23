@@ -4,6 +4,7 @@ use bincode::{Decode, Encode};
 use image::{buffer::ConvertBuffer, DynamicImage};
 use image_dds::{Mipmaps, Surface};
 use thiserror::Error;
+use tracing::debug;
 
 use crate::{handle::Handle, DrumBuilder};
 
@@ -400,11 +401,20 @@ impl Texture {
 			image_format: surface_format,
 		};
 
+		debug!(
+			width = self.extent.width,
+			height = self.extent.height,
+			"processing texture"
+		);
+
+		let start = std::time::Instant::now();
 		let surface = surface.encode(
 			compressed_format,
 			image_dds::Quality::Normal,
 			mipmaps(self.extent),
 		)?;
+
+		debug!( time = ?start.elapsed(), "processed texture");
 
 		self.format = format;
 		self.data = surface.data.into_boxed_slice();
@@ -438,7 +448,6 @@ impl Texture {
 	///
 	/// Panics if the image format is not supported.
 	#[must_use]
-	#[tracing::instrument]
 	pub fn from_image(image: DynamicImage) -> Self {
 		let extent = Extent3d::from_wh(image.width(), image.height());
 		let (data, format) = match image {

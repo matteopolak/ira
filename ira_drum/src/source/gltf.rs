@@ -315,7 +315,7 @@ impl Material {
 	///
 	/// Returns an error if the material's textures cannot be loaded.
 	/// See [`gltf::image::Data::from_source`] for more information.
-	#[tracing::instrument]
+	#[tracing::instrument(skip(drum))]
 	pub fn from_gltf_material<P: AsRef<Path> + fmt::Debug>(
 		drum: &mut DrumBuilder,
 		material: &gltf::Material<'_>,

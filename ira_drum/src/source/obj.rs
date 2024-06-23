@@ -107,13 +107,11 @@ impl Source for ObjSource {
 		let mut centroid = Vec3::ZERO;
 		let mut num_vertices = 0;
 
-		let name = mem::take(&mut self.models[0].name);
-
 		for model in self.models {
 			let mesh = model.mesh;
 			let handle = material_handles[mesh.material_id.unwrap_or(0)];
 
-			let mut vertices = Vec::new();
+			let mut vertices = Vec::with_capacity(mesh.positions.len() / 3);
 
 			let mut min = Vec3::splat(f32::INFINITY);
 			let mut max = Vec3::splat(f32::NEG_INFINITY);
@@ -130,7 +128,7 @@ impl Source for ObjSource {
 				max = max.max(position);
 				centroid += position;
 
-				let normal = if mesh.normals.len() == mesh.positions.len() {
+				let normal = if mesh.normals.len() > i * 3 {
 					[
 						mesh.normals[i * 3],
 						mesh.normals[i * 3 + 1],
@@ -141,8 +139,8 @@ impl Source for ObjSource {
 					Vec3::ZERO
 				};
 
-				let texcoord = if mesh.texcoords.len() == mesh.positions.len() {
-					[mesh.texcoords[i * 2], mesh.texcoords[i * 2 + 1]].into()
+				let texcoord = if mesh.texcoords.len() > i * 2 {
+					[mesh.texcoords[i * 2], 1.0 - mesh.texcoords[i * 2 + 1]].into()
 				} else {
 					Vec2::ZERO
 				};
@@ -172,7 +170,12 @@ impl Source for ObjSource {
 		centroid /= num_vertices as f32;
 
 		let model = Model {
-			name: name.into_boxed_str(),
+			name: self
+				.root
+				.file_name()
+				.and_then(|f| f.to_str())
+				.unwrap_or("unnamed")
+				.into(),
 			meshes: MeshHandles {
 				opaque: opaque_meshes.into_boxed_slice(),
 				transparent: transparent_meshes.into_boxed_slice(),

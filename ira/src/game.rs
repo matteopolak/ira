@@ -19,6 +19,7 @@ use std::{
 use glam::Vec2;
 use ira_drum::Drum;
 use rapier3d::data::Arena;
+use tracing::info;
 #[cfg(feature = "client")]
 use winit::{
 	application::ApplicationHandler,
@@ -284,6 +285,8 @@ impl<Message> Context<Message> {
 				ctx.remove_instance_local(instance_id);
 			}
 			Packet::CreateInstance { options, id } => {
+				info!("creating instance {id:?} with options {options:?}");
+
 				if Some(id) == ctx.instance_id {
 					return;
 				}

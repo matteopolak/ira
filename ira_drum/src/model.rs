@@ -7,7 +7,7 @@ use crate::{handle::Handle, material::Material};
 
 #[must_use]
 #[repr(C)]
-#[derive(Clone, Copy, Debug, Encode, Decode, Zeroable, Pod)]
+#[derive(Clone, Copy, Debug, Encode, Decode, Zeroable, Pod, PartialEq)]
 pub struct Vec3 {
 	pub x: f32,
 	pub y: f32,
@@ -307,13 +307,18 @@ impl Mesh {
 			let tangent = if delta_uv1 == Vec2::ZERO || delta_uv2 == Vec2::ZERO {
 				// Calculate a default tangent using the normal
 				let normal = v0.normal;
-				let auxiliary_vector = if normal.y.abs() > 0.99 {
-					Vec3::X
-				} else {
-					Vec3::Y
-				};
 
-				normal.cross(auxiliary_vector).normalize()
+				if normal == Vec3::ZERO {
+					Vec3::new(1.0, 0.0, 0.0)
+				} else {
+					let auxiliary_vector = if normal.y.abs() > 0.99 {
+						Vec3::X
+					} else {
+						Vec3::Y
+					};
+
+					normal.cross(auxiliary_vector).normalize()
+				}
 			} else {
 				let r = 1.0 / (delta_uv1.x * delta_uv2.y - delta_uv1.y * delta_uv2.x);
 				(delta_pos1 * delta_uv2.y - delta_pos2 * delta_uv1.y) * r

@@ -6,6 +6,7 @@ use bincode::{
 };
 use flate2::{bufread::DeflateDecoder, write::DeflateEncoder, Compression};
 use image_dds::Mipmaps;
+use tracing::debug;
 
 use crate::{source::Source, Extent3d, Handle};
 
@@ -107,6 +108,8 @@ impl Drum {
 	/// See [`bincode::encode_into_writer`] for more information.
 	/// See [`std::fs::File::open`] for more information.
 	pub fn write_to_path<P: AsRef<Path>>(&self, path: P) -> Result<usize, EncodeError> {
+		debug!(path = %path.as_ref().display(), "writing drum to path");
+
 		let mut file = io::BufWriter::with_capacity(
 			Self::BUF_SIZE,
 			File::options()
@@ -125,7 +128,7 @@ impl Drum {
 	/// # Errors
 	///
 	/// See [`super::material::Texture::compress`] for more information.
-	#[tracing::instrument(skip(mipmaps))]
+	#[tracing::instrument(skip(self, mipmaps))]
 	pub fn prepare_textures<F>(
 		&mut self,
 		compress: bool,

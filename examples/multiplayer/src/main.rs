@@ -8,7 +8,7 @@ use std::{
 use ira::{
 	glam::{Quat, Vec3},
 	physics::InstanceHandle,
-	Context, Game, Instance, RigidBodyBuilder,
+	ColliderBuilder, Context, Game, Instance, RigidBodyBuilder,
 };
 use ira_drum::Drum;
 
@@ -46,7 +46,7 @@ impl ira::App for App {
 		let car_id = ctx.drum.model_id("bottled_car").unwrap();
 
 		#[cfg(feature = "server")]
-		let cars = (0..10)
+		let cars = (0..0)
 			.map(|i| {
 				ctx.add_instance(
 					car_id,
@@ -54,7 +54,6 @@ impl ira::App for App {
 						.up(Vec3::Z)
 						.rotation(Quat::from_rotation_x(FRAC_PI_4))
 						.position(Vec3::new(0.0, 10.0 + i as f32 * 5.0, 0.0))
-						.scale(Vec3::splat(5.0))
 						.rigidbody(RigidBodyBuilder::dynamic()),
 				)
 			})
@@ -66,8 +65,8 @@ impl ira::App for App {
 		ctx.add_instance(
 			ctx.drum.model_id("boring_cube").unwrap(),
 			Instance::builder()
-				.position(Vec3::Y * -5.0)
-				.scale(Vec3::new(100.0, 1.0, 100.0)),
+				.position(Vec3::Y * -10.0)
+				.scale(Vec3::new(10.0, 1.0, 10.0)),
 		);
 
 		#[cfg(feature = "client")]
@@ -98,22 +97,21 @@ impl ira::App for App {
 		#[cfg(feature = "client")]
 		self.player.on_update(ctx, delta);
 
-		#[cfg(all(feature = "server", feature = "client"))]
+		#[cfg(feature = "client")]
 		if ctx.pressed(ira::KeyCode::KeyC) && self.last_car_spawn.elapsed() > Duration::from_secs(1)
 		{
 			self.last_car_spawn = Instant::now();
 
 			let car_id = ctx.drum.model_id("bottled_car").unwrap();
-			self.cars.push(
-				ctx.add_instance(
-					car_id,
-					Instance::builder()
-						.up(Vec3::Z)
-						.rotation(Quat::from_rotation_x(FRAC_PI_4))
-						.position(Vec3::new(0.0, 10.0, 0.0))
-						.scale(Vec3::splat(5.0))
-						.rigidbody(RigidBodyBuilder::dynamic()),
-				),
+
+			ctx.add_instance(
+				car_id,
+				Instance::builder()
+					.up(Vec3::Z)
+					.rotation(Quat::from_rotation_x(FRAC_PI_4))
+					.position(Vec3::new(0.0, 10.0, 0.0))
+					.scale(Vec3::splat(10.0))
+					.rigidbody(RigidBodyBuilder::dynamic()),
 			);
 		}
 	}

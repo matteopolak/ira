@@ -337,6 +337,7 @@ impl<Message> Context<Message> {
 		let instance_id = model.handles.len() as u32;
 
 		let handle = self.instances.insert_with(|handle| {
+			let handle = InstanceHandle::new(handle);
 			let (axis, angle) = instance.rotation.to_axis_angle();
 
 			instance.collider = instance
@@ -346,12 +347,12 @@ impl<Message> Context<Message> {
 			instance.rigidbody = instance.rigidbody.map(|body| {
 				body.position(instance.position.into())
 					.rotation((axis * angle).into())
-					.user_data(handle.to_u128())
+					.user_data(handle.into())
 			});
 
 			let instance = self.physics.add_instance(instance, model_id, instance_id);
 
-			model.add_gpu_instance(&instance, InstanceHandle::new(handle), &self.physics);
+			model.add_gpu_instance(&instance, handle, &self.physics);
 
 			instance
 		});

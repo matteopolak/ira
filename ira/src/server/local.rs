@@ -147,8 +147,57 @@ where
 				let packet = client.try_read_packet(&self.next_instance_id, &mut self.owners);
 
 				match packet {
-					Ok(Some(packet)) => {
-						packets.push((client.id(), packet.into_trusted(client.id())));
+					Ok(Some(mut packet)) => {
+						let id = match &mut packet {
+							Packet::CreateInstance { options, id } => {
+								*id = InstanceId::new(
+									self.next_instance_id.fetch_add(1, Ordering::SeqCst),
+								);
+
+								self.instances.insert(*id, options.clone());
+								self.owners.insert(*id, client.id());
+
+								ClientId::SERVER
+							}
+							Packet::DeleteInstance { id } => {
+								if self.owners.get(id) != Some(&client.id()) {
+									warn!(instance_id = ?id, client_id = ?client.id(), "client tried to delete instance they don't own");
+
+									continue;
+								}
+
+								self.instances.remove(id);
+								self.owners.remove(id);
+
+								ClientId::SERVER
+							}
+							Packet::UpdateInstance { id, delta } => {
+								if self.owners.get(id) != Some(&client.id()) {
+									warn!(instance_id = ?id, client_id = ?client.id(), "client tried to update instance they don't own");
+
+									continue;
+								}
+
+								if let Some(instance) = self.instances.get_mut(id) {
+									instance.apply(delta);
+								};
+
+								client.id()
+							}
+							Packet::DeleteClient => {
+								self.owners.retain(|_, owner| *owner != client.id());
+
+								client.id()
+							}
+							Packet::Custom(..) | Packet::CreateClient { .. } => client.id(),
+							Packet::Connected { .. } => {
+								warn!("received Connected packet from client");
+
+								continue;
+							}
+						};
+
+						packets.push((id, packet.into_trusted(client.id())));
 					}
 					Ok(None) => {
 						break;

@@ -133,6 +133,8 @@ fn pack(
 	let mut drum = drum.build();
 	let mipmaps = mipmaps.map_or(Mipmaps::GeneratedAutomatic, Mipmaps::GeneratedExact);
 
+	info!("processing textures");
+
 	drum.prepare_textures(compress, srgb, |_| mipmaps)?;
 
 	Ok(drum)
