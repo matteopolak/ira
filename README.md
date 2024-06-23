@@ -2,6 +2,18 @@
 
 A general-purpose, code-first game engine.
 
+## Features
+
+- PBR rendering and lighting with [`wgpu`](https://github.com/gfx-rs/wgpu) for graphics
+- Simple packaging system for game assets with [`ira_drum`](./ira_drum)
+  - glTF 2.0 support
+  - OBJ support
+- Physics with [`rapier`](https://github.com/dimforge/rapier)
+- Built-in multiplayer support with custom packet support
+- Headless server, client, and server-client support
+
+## Examples
+
 ```rust
 struct App {
   car: InstanceRef,
@@ -35,4 +47,12 @@ More examples can be found in the [`examples`](examples) directory.
 The `ira` tool can be used to pack various game assets (glTF, etc.) into a single Drum.
 
 See the [ira_cli](ira_cli/README.md) documentation for more information.
+
+## Screenshots
+
+![basic](screenshots/basic.png)
+
+## License
+
+Licensed under the MIT license.
 
