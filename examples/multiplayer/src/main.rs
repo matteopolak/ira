@@ -10,7 +10,7 @@ use ira::{
 	glam::{Quat, Vec3},
 	packet::{Packet, TrustedPacket},
 	physics::InstanceHandle,
-	ColliderBuilder, Context, Game, Instance, RigidBodyBuilder,
+	ColliderBuilder, Context, Game, Instance, KeyCode, RigidBodyBuilder,
 };
 use ira_drum::Drum;
 
@@ -30,11 +30,16 @@ enum Message {
 
 impl ira::App<Message> for App {
 	fn listen() -> std::net::TcpListener {
-		std::net::TcpListener::bind("0.0.0.0:10585").unwrap()
+		std::net::TcpListener::bind("0.0.0.0:10585").expect("failed to bind to port 10585")
 	}
 
 	fn connect() -> std::net::TcpStream {
-		std::net::TcpStream::connect(std::env::args().nth(1).unwrap()).unwrap()
+		std::net::TcpStream::connect(
+			std::env::args()
+				.nth(1)
+				.expect("expected an IP address to connect to as the first argument"),
+		)
+		.expect("failed to connect to server")
 	}
 
 	fn create_player(ctx: &mut Context<Message>) -> (u32, ira::InstanceBuilder) {
@@ -130,8 +135,7 @@ impl ira::App<Message> for App {
 		#[cfg(feature = "client")]
 		if ctx.pressed(ira::KeyCode::KeyC) && self.car_spawn.check() {
 			let car_id = ctx.drum.model_id("bottled_car").unwrap();
-
-			ctx.add_instance(
+			let handle = ctx.add_instance(
 				car_id,
 				Instance::builder()
 					.up(Vec3::Z)
@@ -140,6 +144,9 @@ impl ira::App<Message> for App {
 					.scale(Vec3::splat(10.0))
 					.rigidbody(RigidBodyBuilder::dynamic()),
 			);
+
+			#[cfg(feature = "server")]
+			self.cars.push(handle);
 		}
 
 		#[cfg(feature = "client")]
