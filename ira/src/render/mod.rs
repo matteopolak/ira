@@ -44,9 +44,15 @@ impl RenderState {
 
 		let (device, queue) = request_device(&adapter).await;
 
+		let format = *surface
+			.get_capabilities(&adapter)
+			.formats
+			.first()
+			.expect("no formats found");
+
 		let config = wgpu::SurfaceConfiguration {
 			usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-			format: wgpu::TextureFormat::Bgra8UnormSrgb,
+			format,
 			width: size.width,
 			height: size.height,
 			desired_maximum_frame_latency: 2,
@@ -99,6 +105,7 @@ impl RenderState {
 			&camera,
 			&lights,
 			sample_count,
+			format,
 		);
 
 		let multisampled_texture = GpuTexture::create_multisampled(&device, &config, sample_count);
@@ -346,6 +353,7 @@ pub fn create_pbr_render_pipelines(
 	camera: &Camera,
 	lights: &light::Lights,
 	sample_count: u32,
+	format: wgpu::TextureFormat,
 ) -> (wgpu::RenderPipeline, wgpu::RenderPipeline) {
 	let shader = device.create_shader_module(wgpu::include_wgsl!(concat!(
 		env!("CARGO_MANIFEST_DIR"),
@@ -367,7 +375,7 @@ pub fn create_pbr_render_pipelines(
 		device,
 		&pipeline_layout,
 		wgpu::ColorTargetState {
-			format: wgpu::TextureFormat::Bgra8UnormSrgb,
+			format,
 			blend: None,
 			write_mask: wgpu::ColorWrites::ALL,
 		},
@@ -378,7 +386,7 @@ pub fn create_pbr_render_pipelines(
 
 	let transparent_render_pipeline = {
 		let transparent_target = wgpu::ColorTargetState {
-			format: wgpu::TextureFormat::Bgra8UnormSrgb,
+			format,
 			blend: Some(wgpu::BlendState {
 				color: wgpu::BlendComponent {
 					src_factor: wgpu::BlendFactor::SrcAlpha,
