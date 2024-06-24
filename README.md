@@ -1,5 +1,8 @@
 # Ira
 
+[![lint status](https://github.com/matteopolak/ira/workflows/lint/badge.svg)](https://github.com/matteopolak/ira/actions)
+[![test status](https://github.com/matteopolak/ira/workflows/test/badge.svg)](https://github.com/matteopolak/ira/actions)
+
 A general-purpose, code-first game engine.
 
 ## Features
