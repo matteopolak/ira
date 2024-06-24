@@ -110,12 +110,15 @@ impl Instance {
 	/// # Examples
 	///
 	/// ```rust
-	/// let instance = Instance::builder()
+	/// use glam::Vec3;
+	/// use rapier3d::prelude::*;
+	/// use ira::model::Instance;
+	///
+	/// let builder = Instance::builder()
 	///   .position(Vec3::new(0.0, 10.0, 0.0))
 	///   .scale(Vec3::splat(1.0))
 	///   .rigidbody(RigidBodyBuilder::dynamic())
 	///   .collider(ColliderBuilder::cuboid(1.0, 1.0, 1.0));
-	///   .build();
 	/// ```
 	pub fn builder() -> InstanceBuilder {
 		InstanceBuilder::default()

@@ -486,7 +486,10 @@ impl InstanceHandle {
 	///
 	/// # Examples
 	///
-	/// ```rust
+	/// ```rust,no_compile
+	/// use ira::{physics::InstanceHandle, game::Context};
+	///
+	/// let ctx: &mut Context = ...;
 	/// let instance: InstanceHandle = ...;
 	///
 	/// instance.update(ctx, |instance, physics| {

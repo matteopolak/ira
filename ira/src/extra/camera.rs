@@ -63,9 +63,12 @@ impl CameraController {
 	/// # Example
 	///
 	/// ```
+	/// use std::f32::consts::FRAC_PI_2;
+	/// use glam::Vec3;
+	/// use ira::extra::camera::CameraController;
+	///
 	/// let camera = CameraController::default()
-	///   .with_pitch(0.0)
-	///   .with_yaw(FRAC_PI_2);
+	///   .with_pitch(FRAC_PI_2);
 	///
 	/// let dir = Vec3::Z;
 	/// let transformed = camera.transform_dir(dir);

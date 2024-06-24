@@ -11,6 +11,9 @@ use std::time::{Duration, Instant};
 /// # Examples
 ///
 /// ```rust
+/// use std::{time::Duration, thread::sleep};
+/// use ira::extra::ratelimit::Ratelimit;
+///
 /// let mut ratelimit = Ratelimit::new(Duration::from_secs(1));
 /// let mut actions = 0;
 ///
