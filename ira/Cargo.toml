@@ -1,6 +1,6 @@
 [package]
 name = "ira"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 license = "MIT"
 authors = ["Matthew Polak <git@matteopolak.com>"]
@@ -22,7 +22,7 @@ rapier3d = "0.20"
 tracing = "0.1"
 
 [dependencies.ira_drum]
-path = "../ira_drum"
+workspace = true
 default-features = false
 features = ["gltf", "glam", "obj"]
 

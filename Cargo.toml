@@ -2,3 +2,7 @@
 members = ["ira", "ira_cli", "ira_drum", "examples/*", "ira_cli"]
 resolver = "2"
 
+[workspace.dependencies]
+ira = { path = "ira", version = "0.3.0" }
+ira_drum = { path = "ira_drum", version = "0.3.0" }
+

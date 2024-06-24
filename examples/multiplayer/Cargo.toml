@@ -6,8 +6,8 @@ license = "MIT"
 
 [dependencies]
 bitcode = "0.6"
-ira.path = "../../ira"
-ira_drum.path = "../../ira_drum"
+ira.workspace = true
+ira_drum.workspace = true
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 [dependencies.basic]

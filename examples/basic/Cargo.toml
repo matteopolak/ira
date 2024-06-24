@@ -5,8 +5,8 @@ authors = ["Matthew Polak <git@matteopolak.com>"]
 license = "MIT"
 
 [dependencies]
-ira.path = "../../ira"
-ira_drum.path = "../../ira_drum"
+ira.workspace =true
+ira_drum.workspace = true
 
 [features]
 default = []
