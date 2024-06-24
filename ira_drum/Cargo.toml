@@ -22,7 +22,7 @@ version = "1"
 features = ["derive"]
 
 [dependencies.glam]
-version = "0.27"
+version = "0.28"
 optional = true
 
 [dependencies.gltf]
