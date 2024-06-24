@@ -75,37 +75,40 @@ impl Client {
 
 	/// Tries to complete the current packet, returning
 	/// the packet data if it completes.
+	///
+	/// # Errors
+	///
+	/// See [`TcpStream::read`].
 	pub fn next_packet(&mut self) -> io::Result<Vec<u8>> {
 		let mut partial = mem::take(&mut self.next_packet);
 
-		let len = match partial.len {
-			Some(len) => len,
-			None => {
-				while partial.offset < 4 {
-					let n = match self.stream.read(&mut partial.data[partial.offset..4]) {
-						Ok(n) => n,
-						Err(e) => {
-							self.next_packet = partial;
-							return Err(e);
-						}
-					};
+		let len = if let Some(len) = partial.len {
+			len
+		} else {
+			while partial.offset < 4 {
+				let n = match self.stream.read(&mut partial.data[partial.offset..4]) {
+					Ok(n) => n,
+					Err(e) => {
+						self.next_packet = partial;
+						return Err(e);
+					}
+				};
 
-					partial.offset += n;
-				}
-
-				let len = u32::from_le_bytes([
-					partial.data[0],
-					partial.data[1],
-					partial.data[2],
-					partial.data[3],
-				]) as usize;
-
-				partial.len = Some(len);
-				partial.data.resize(len, 0);
-				partial.offset = 0;
-
-				len
+				partial.offset += n;
 			}
+
+			let len = u32::from_le_bytes([
+				partial.data[0],
+				partial.data[1],
+				partial.data[2],
+				partial.data[3],
+			]) as usize;
+
+			partial.len = Some(len);
+			partial.data.resize(len, 0);
+			partial.offset = 0;
+
+			len
 		};
 
 		while partial.offset < len {

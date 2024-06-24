@@ -101,12 +101,12 @@ where
 					self.owners.insert(*id, client_id);
 				}
 				Packet::DeleteInstance { id } => {
-					self.instances.remove(&id);
-					self.owners.remove(&id);
+					self.instances.remove(id);
+					self.owners.remove(id);
 				}
 				Packet::UpdateInstance { id, delta } => {
-					if let Some(instance) = self.instances.get_mut(&id) {
-						instance.apply(&delta);
+					if let Some(instance) = self.instances.get_mut(id) {
+						instance.apply(delta);
 					};
 				}
 				Packet::DeleteClient => {
